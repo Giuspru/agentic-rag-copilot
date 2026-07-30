@@ -1,129 +1,145 @@
 # Agentic RAG Copilot
 
-A local-first, **self-corrective Agentic RAG** system over technical and maintenance
-documentation, built with **LangChain / LangGraph**, **FastAPI**, **Chroma** and local
-LLMs served by **Ollama**. No cloud, no API keys, no costs — everything runs on-device.
+![Agentic RAG Copilot — dal manuale tecnico ai chunk vettoriali, fino alla risposta citata, interamente in locale](img/01.png)
 
-> **Status:** Phase 1 complete (linear RAG baseline, end-to-end and tested).
-> Phase 2 (the LangGraph self-corrective agent) is in progress.
+Sistema **RAG agentico self-corrective** su documentazione tecnica di manutenzione,
+costruito con **LangChain / LangGraph**, **FastAPI**, **Chroma** e LLM locali serviti da
+**Ollama**. Nessun cloud, nessuna API key, nessun costo: tutto gira sulla macchina.
 
-## Why this project
+> **Stato:** Fase 1 completata (baseline RAG lineare, funzionante end-to-end e testata).
+> Fase 2 (agente self-corrective con LangGraph) in corso.
 
-Built to demonstrate the core skills of an *Agentic AI / LLM Developer*: deep RAG,
-agent orchestration with LangGraph, robustness and observability, and CI/CD with
-automated evaluation.
+## Perché questo progetto
 
-The approach is deliberately incremental: first a **linear RAG baseline**, then the
-**agentic layer** on top of it — so the "before/after" is visible and every design
-decision can be explained.
+Nasce per dimostrare le competenze centrali di un ruolo *Agentic AI / LLM Developer*:
+RAG approfondito, orchestrazione di agenti con LangGraph, robustezza e osservabilità,
+CI/CD con valutazione automatica della qualità.
 
-### Why a linear RAG is not enough
+L'approccio è volutamente incrementale: prima una **baseline RAG lineare**, poi lo
+**strato agentico** costruito sopra. Così il "prima/dopo" è visibile e ogni scelta
+progettuale può essere spiegata e difesa.
 
-The baseline already exposes its own limits, which is exactly the point. Asking
-*"pump vibrating"* against the sample corpus does **not** retrieve the ideal
-troubleshooting section in the top-k results — semantic similarity alone picks
-neighbouring sections instead. That failure is the concrete motivation for the
-agentic layer: grading retrieved documents and rewriting the query when they are
-not relevant.
+### Perché un RAG lineare non basta
 
-## Architecture
+La baseline mette già in luce i propri limiti, ed è esattamente questo il punto. La
+domanda *"pump vibrating"* sul corpus di esempio **non** recupera la sezione di
+troubleshooting ideale tra i primi k risultati: la sola similarità semantica pesca
+sezioni vicine ma meno pertinenti. Quel fallimento è la motivazione concreta dello
+strato agentico — valutare i documenti recuperati (*grading*) e riformulare la query
+quando non sono rilevanti.
 
-The target agent is a **CRAG / Self-RAG** style graph — conditional edges and loops,
-not a straight line:
+## Architettura
+
+L'agente finale è un grafo in stile **CRAG / Self-RAG**: archi condizionali e cicli,
+non una linea retta.
 
 ```
-question
+domanda
    |
    v
-[route] -----> does this need retrieval?
+[route] ------> serve davvero il retrieval?
    |
    v
-[retrieve] --> fetch candidate chunks from the vector store
+[retrieve] ---> recupera i chunk candidati dal vector store
    |
    v
-[grade] -----> are the chunks actually relevant?
-   |  yes            | no
-   |                 +--> [rewrite query] --> back to retrieve
+[grade] ------> i chunk sono davvero rilevanti?
+   |  sì              | no
+   |                  +--> [riscrivi query] --> torna a retrieve
    v
-[generate] --> answer using the chunks only
+[generate] ---> genera la risposta usando SOLO i chunk
    |
    v
-[check] -----> is the answer grounded in the chunks?
-   |  yes            | no
-   |                 +--> regenerate, or admit "I don't know"
+[check] ------> la risposta è fondata sui chunk?
+   |  sì              | no
+   |                  +--> rigenera, oppure ammette "non lo so"
    v
-final answer + source citations
+risposta finale + citazione delle fonti
 ```
 
-## Tech stack
+La differenza rispetto a un RAG classico sta tutta nelle frecce che **tornano
+indietro**: l'agente non si limita a rispondere, ma valuta il proprio lavoro e si
+corregge.
 
-| Area | Tool |
+## Stack tecnologico
+
+| Ambito | Strumento |
 |---|---|
-| Agent orchestration | LangGraph + LangChain |
-| LLM (local) | Ollama — `llama3.2:3b` |
-| Embeddings (local) | Ollama — `nomic-embed-text` |
-| Vector store | Chroma (persisted on disk) |
+| Orchestrazione agente | LangGraph + LangChain |
+| LLM (locale) | Ollama — `llama3.2:3b` |
+| Embeddings (locale) | Ollama — `nomic-embed-text` |
+| Vector store | Chroma (persistito su disco) |
 | Backend API | FastAPI |
-| Config | pydantic-settings |
-| Eval / Observability | ragas + Arize Phoenix *(planned)* |
-| CI | GitHub Actions *(planned)* |
+| Configurazione | pydantic-settings |
+| Eval / Observability | ragas + Arize Phoenix *(previsti)* |
+| CI | GitHub Actions *(prevista)* |
 
-## Project layout
+## Struttura del progetto
 
 ```
 src/copilot/
-├── config.py          # centralized settings (pydantic-settings, COPILOT_ prefix)
+├── config.py          # configurazione centralizzata (pydantic-settings, prefisso COPILOT_)
 ├── llm/
-│   ├── provider.py    # get_llm()        — model-agnostic LLM factory
-│   └── embeddings.py  # get_embeddings() — embedding model factory
+│   ├── provider.py    # get_llm()        — factory dell'LLM, model-agnostic
+│   └── embeddings.py  # get_embeddings() — factory del modello di embedding
 └── rag/
     ├── ingestion.py   # load_documents(), split_documents(), ingest()
-    ├── vectorstore.py # get_vectorstore() — Chroma connection
-    ├── retriever.py   # get_retriever()   — vector store as a Runnable
-    └── chain.py       # get_rag_chain(), answer() — the LCEL RAG chain
+    ├── vectorstore.py # get_vectorstore() — connessione a Chroma
+    ├── retriever.py   # get_retriever()   — il vector store come Runnable
+    └── chain.py       # get_rag_chain(), answer() — la chain LCEL
 
-data/manuals/          # source corpus (versioned)
-data/chroma/           # generated vector DB (not versioned — rebuild with ingest())
-Test_Funzioni/         # one hands-on test script per function, bottom-up
-info/                  # design docs and study notes (Italian)
+data/manuals/          # corpus sorgente (versionato)
+data/chroma/           # vector DB generato (non versionato: si rigenera con ingest())
+Test_Funzioni/         # uno script di test per funzione, in ordine bottom-up
+info/                  # documenti di design e note di studio
+img/                   # immagini del progetto
 ```
 
-## Quickstart
+Il criterio è la **separazione delle responsabilità**: `llm/` conosce solo i modelli,
+`rag/` solo il recupero della conoscenza, `config.py` è l'unico posto dove vivono i
+parametri. Ogni modulo è testabile da solo.
 
-**Prerequisites:** [Ollama](https://ollama.com) running locally, Python 3.11.
+## Avvio rapido
+
+**Prerequisiti:** [Ollama](https://ollama.com) attivo in locale, Python 3.11.
 
 ```bash
-# 1. pull the local models (~2.3 GB total)
+# 1. scarica i modelli locali (~2,3 GB in totale)
 ollama pull llama3.2:3b
 ollama pull nomic-embed-text
 
-# 2. install the project (editable, with dev extras)
+# 2. installa il progetto (editable, con le dipendenze di sviluppo)
 pip install -e ".[dev]"
 
-# 3. build the vector store from data/manuals/
+# 3. costruisci il vector store a partire da data/manuals/
 python -c "from copilot.rag.ingestion import ingest; print(ingest())"
 
-# 4. ask a question
+# 4. fai una domanda
 python -c "from copilot.rag.chain import answer; print(answer('What grease should I use for the bearings?'))"
 ```
 
-Configuration is optional — every setting has a default. To override, copy
-`.env.example` to `.env`.
+La configurazione è opzionale: ogni parametro ha un default sensato. Per modificarli,
+copia `.env.example` in `.env`.
+
+> Il corpus e i prompt sono in **inglese** per una ragione tecnica: i test sugli
+> embedding hanno mostrato una separazione semantica molto più netta in inglese che in
+> italiano con `nomic-embed-text`, e un retrieval debole avrebbe compromesso tutto il
+> resto della catena.
 
 ## Roadmap
 
-| Phase | Focus | Status |
+| Fase | Focus | Stato |
 |---|---|---|
-| 1 | Linear RAG baseline (ingestion, retrieval, LCEL chain, citations) | ✅ done |
-| 2 | LangGraph self-corrective agent (route / grade / generate / check) | 🔜 next |
-| 3 | Guardrails, error handling, tracing with Phoenix | planned |
-| 4 | Evaluation datasets (ragas + trajectory eval) and CI/CD | planned |
-| 5 | Optional: external tools (CMMS), Docker/K8s, alternative agent frameworks | future |
+| 1 | Baseline RAG lineare (ingestion, retrieval, chain LCEL, citazioni) | ✅ completata |
+| 2 | Agente self-corrective con LangGraph (route / grade / generate / check) | 🔜 prossima |
+| 3 | Guardrail, gestione errori, tracing con Phoenix | prevista |
+| 4 | Dataset di valutazione (ragas + trajectory eval) e CI/CD | prevista |
+| 5 | Opzionali: tool verso sistemi esterni (CMMS), Docker/K8s, framework alternativi | futura |
 
-## Documentation
+## Documentazione
 
-Design documents live in [`info/`](info/) and are written in Italian:
+I documenti di progettazione si trovano in [`info/`](info/):
 
-- [`info/PROGETTO.md`](info/PROGETTO.md) — vision, RAG concepts, architecture, folder layout
-- [`info/FASI.md`](info/FASI.md) — the five phases in detail
-- [`info/TEORIA/`](info/TEORIA/) — study notes on LangChain internals (Runnables, LCEL, `.invoke()`)
+- [`info/PROGETTO.md`](info/PROGETTO.md) — visione, concetti RAG, architettura, struttura
+- [`info/FASI.md`](info/FASI.md) — le cinque fasi nel dettaglio
+- [`info/TEORIA/`](info/TEORIA/) — note di studio sugli interni di LangChain (Runnable, LCEL, `.invoke()`)
