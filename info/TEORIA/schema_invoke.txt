@@ -1,0 +1,95 @@
+========================================================================
+SCHEMA DEGLI .invoke()  INNESCATI DA  answer(domanda)
+Progetto "Agentic Maintenance Copilot" - RAG lineare (chain.py)
+========================================================================
+
+answer("domanda")  ->  return get_rag_chain().invoke("domanda")
+
+La chain e' un RunnableSequence di 4 passi; ogni passo riceve .invoke()
+e il suo output diventa l'input del passo dopo. Alcuni passi, al loro
+interno, scatenano ALTRI .invoke() annidati.
+
+
+------------------------------------------------------------------------
+LA CASCATA COMPLETA (in ordine di esecuzione)
+------------------------------------------------------------------------
+
+answer("domanda")
+|
++-(0)- get_rag_chain().invoke("domanda")        <- LA chiamata che fai TU (RunnableSequence)
+       |   input:  "domanda" (str)
+       |   La RunnableSequence esegue i suoi 4 passi in fila:
+       |
+       +-(1)- RunnableParallel.invoke("domanda")          <- il dict {context, question}
+       |      |   Passa lo STESSO input "domanda" a ENTRAMBI i rami, in parallelo:
+       |      |
+       |      +-(1a)- (retriever | format_docs).invoke("domanda")   <- ramo "context"
+       |      |        |   (e' a sua volta una RunnableSequence di 2 pezzi)
+       |      |        |
+       |      |        +-(1a-i)--  VectorStoreRetriever.invoke("domanda")
+       |      |        |              -> list[Document]  (4 chunk)
+       |      |        |
+       |      |        +-(1a-ii)-  RunnableLambda(format_docs).invoke(list[Document])
+       |      |                       -> "stringa contesto"  (str)
+       |      |
+       |      +-(1b)- RunnablePassthrough.invoke("domanda")         <- ramo "question"
+       |               -> "domanda"  (str, invariata)
+       |
+       |      output del passo (1):  {"context": "stringa...", "question": "domanda"}
+       |
+       +-(2)- ChatPromptTemplate.invoke({"context":..., "question":...})
+       |        -> ChatPromptValue  (SystemMessage + HumanMessage)
+       |
+       +-(3)- ChatOllama.invoke(messaggi)
+       |        -> AIMessage  (la risposta grezza del modello)
+       |
+       +-(4)- StrOutputParser.invoke(AIMessage)
+                -> "testo risposta"  (str)
+
+output finale (0): "testo risposta" -> tornato ad answer() -> tornato a te
+
+
+------------------------------------------------------------------------
+CONTEGGIO: TU chiami 1 solo invoke (0). Internamente se ne innescano 8.
+------------------------------------------------------------------------
+
+ #      | Chi                              | input -> output
+--------+----------------------------------+-----------------------------
+ 0      | RunnableSequence (la chain)      | str -> str        <- lo chiami TU
+ 1      | RunnableParallel (il dict)       | str -> dict
+ 1a     | RunnableSequence (ramo context)  | str -> str
+ 1a-i   | VectorStoreRetriever             | str -> list[Document]
+ 1a-ii  | RunnableLambda (format_docs)     | list[Document] -> str
+ 1b     | RunnablePassthrough              | str -> str
+ 2      | ChatPromptTemplate               | dict -> messaggi
+ 3      | ChatOllama                       | messaggi -> AIMessage
+ 4      | StrOutputParser                  | AIMessage -> str
+
+
+------------------------------------------------------------------------
+I TRE PUNTI DA NOTARE
+------------------------------------------------------------------------
+
+1) .invoke() si annida come le matrioske.
+   La chain (0) non "fa il lavoro": lo delega chiamando .invoke() sui
+   suoi 4 passi. Alcuni di quei passi (il RunnableParallel, il ramo
+   context) sono ANCHE loro Runnable composti, e delegano ancora piu' in
+   profondita'. E' .invoke() che chiama .invoke() che chiama .invoke().
+
+2) Il ramo parallelo scatena 2 sotto-invoke dallo stesso input.
+   Al punto (1), RunnableParallel passa la STESSA "domanda" sia al ramo
+   context (1a) sia al ramo question (1b). Non sono in sequenza tra loro:
+   partono entrambi da li'. E' il "dict parallelo" visto come due
+   .invoke() indipendenti.
+
+3) format_docs - funzione normale - riceve un .invoke().
+   Al punto (1a-ii) format_docs e' la tua funzione Python, ma dentro la
+   chain e' stata avvolta in un RunnableLambda. Quell'involucro le da'
+   .invoke(), cosi' anche lei partecipa alla cascata come tutti gli
+   altri. (E' il "wrapping automatico" dell'operatore | )
+
+------------------------------------------------------------------------
+IN SINTESI: 1 invoke chiamato da te -> 8 invoke eseguiti internamente,
+in questa esatta sequenza. Ogni freccia della chain LCEL corrisponde a
+uno di questi .invoke() - e' la "srotolatura" completa di get_rag_chain().
+========================================================================

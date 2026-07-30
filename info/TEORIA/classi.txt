@@ -1,0 +1,127 @@
+========================================================================
+LE CLASSI/OGGETTI DI LANGCHAIN E LE LORO RELAZIONI (padre -> figli)
+Riferito al progetto "Agentic Maintenance Copilot"
+========================================================================
+
+NOTA: i nomi delle classi INTERMEDIE possono variare leggermente tra le
+versioni di LangChain (qui: LangChain 1.x). La struttura CONCETTUALE qui
+sotto e' quella stabile e corretta. Verifica esatta possibile con .__mro__.
+
+Idea di fondo: NON tutti gli oggetti sono parenti tra loro. Ci sono TRE
+gruppi distinti.
+
+
+------------------------------------------------------------------------
+FAMIGLIA 1 - I "Runnable"
+(i mattoncini che si azionano con .invoke() e si concatenano con | )
+------------------------------------------------------------------------
+Tutti hanno .invoke() perche' discendono dalla stessa radice: Runnable.
+
+Runnable                                  <- LA RADICE. Definisce
+|                                            .invoke / .batch / .stream / .ainvoke
+|
++-- BaseRetriever
+|      +-- VectorStoreRetriever           <- il tuo get_retriever()
+|
++-- BasePromptTemplate
+|      +-- BaseChatPromptTemplate
+|             +-- ChatPromptTemplate      <- il tuo PROMPT
+|
++-- BaseLanguageModel
+|      +-- BaseChatModel
+|             +-- ChatOllama              <- il tuo get_llm()
+|
++-- BaseOutputParser
+|      +-- StrOutputParser                <- in fondo alla tua chain
+|
++-- (Runnable "strutturali", creati dalle pipe)
+       +-- RunnableSequence               <- e' cio' che PRODUCE  A | B | C
+       +-- RunnableParallel               <- e' cio' che PRODUCE  il dict
+       |                                     {context:..., question:...}
+       +-- RunnablePassthrough            <- il tuo RunnablePassthrough()
+       |                                     ("lascia passare l'input invariato")
+       +-- RunnableLambda                 <- avvolge una funzione normale
+                                             (es. format_docs) in un Runnable
+
+CONCETTO CHIAVE:
+- get_rag_chain() restituisce un RunnableSequence.
+- Il dict {context, question} diventa un RunnableParallel.
+- Sono anch'essi Runnable -> una chain intera si puo' mettere dentro
+  un'altra chain (mattoncini che contengono altri mattoncini).
+
+
+------------------------------------------------------------------------
+FAMIGLIA 2 - Gli oggetti-DATO
+(cio' che SCORRE dentro i Runnable; NON hanno .invoke(), non si usano con | )
+------------------------------------------------------------------------
+Sono i "pezzi sul nastro trasportatore" che entrano ed escono dai Runnable.
+
+Document                     <- il "pacchetto" testo + metadata.
+                                Output del retriever.
+                                (page_content: str  +  metadata: dict)
+
+BaseMessage                  <- la radice dei messaggi di chat
+   +-- SystemMessage         <- ruolo "system" (regole/guardrail)
+   +-- HumanMessage          <- ruolo "human" (la domanda)
+   +-- AIMessage             <- risposta del modello (output di ChatOllama)
+
+Tipi che scorrono nella chain:
+   str  ->  list[Document]  ->  messaggi (BaseMessage)  ->  AIMessage  ->  str
+
+
+------------------------------------------------------------------------
+FAMIGLIA 3 - I "motori/costruttori"
+(servono a COSTRUIRE i Runnable, ma NON sono Runnable: niente .invoke() )
+------------------------------------------------------------------------
+
+VectorStore                  <- base dei database vettoriali
+   +-- Chroma                <- il tuo get_vectorstore()
+
+Embeddings                   <- base dei modelli di embedding
+   +-- OllamaEmbeddings      <- il tuo get_embeddings() (nomic-embed-text)
+
+PUNTO SOTTILE E IMPORTANTE:
+- Chroma NON e' un Runnable -> non ha .invoke().
+- Per questo nella chain NON usi get_vectorstore() direttamente, ma
+  get_retriever(): as_retriever() prende il Chroma (Famiglia 3) e lo
+  "veste" da VectorStoreRetriever (Famiglia 1), rendendolo azionabile
+  con .invoke() e concatenabile con |.
+  => as_retriever() e' IL PONTE tra Famiglia 3 e Famiglia 1.
+- Idem OllamaEmbeddings: motore usato da Chroma per vettorizzare, ma
+  non lo metti mai in una pipe.
+
+
+------------------------------------------------------------------------
+TABELLA RIASSUNTIVA DEL PROGETTO
+------------------------------------------------------------------------
+Oggetto (tuo codice)      | Classe               | Famiglia      | .invoke()?
+--------------------------+----------------------+---------------+-----------
+get_retriever()           | VectorStoreRetriever | 1 - Runnable  |   SI
+PROMPT                    | ChatPromptTemplate   | 1 - Runnable  |   SI
+get_llm()                 | ChatOllama           | 1 - Runnable  |   SI
+StrOutputParser()         | StrOutputParser      | 1 - Runnable  |   SI
+get_rag_chain()           | RunnableSequence     | 1 - Runnable  |   SI
+RunnablePassthrough()     | RunnablePassthrough  | 1 - Runnable  |   SI
+i chunk dal retriever     | Document             | 2 - Dato      |   NO
+i messaggi del prompt     | System/HumanMessage  | 2 - Dato      |   NO
+la risposta dell'LLM      | AIMessage            | 2 - Dato      |   NO
+get_vectorstore()         | Chroma               | 3 - Motore    |   NO
+get_embeddings()          | OllamaEmbeddings     | 3 - Motore    |   NO
+
+
+------------------------------------------------------------------------
+REGOLA MENTALE PER IL COLLOQUIO
+------------------------------------------------------------------------
+Tre domande per collocare qualsiasi oggetto LangChain:
+
+1) Posso azionarlo con .invoke() e metterlo in una pipe | ?
+   -> e' un RUNNABLE (Famiglia 1).
+
+2) E' qualcosa che SCORRE dentro la pipeline (un dato prodotto/consumato)?
+   -> e' un OGGETTO-DATO (Famiglia 2: Document, BaseMessage).
+
+3) E' un "motore" che serve a costruire un Runnable ma non entra nella pipe?
+   -> e' INFRASTRUTTURA (Famiglia 3: VectorStore, Embeddings).
+
+Il ponte tra Famiglia 3 e 1 e' as_retriever():
+trasforma il database (motore) in un retriever (mattoncino azionabile).

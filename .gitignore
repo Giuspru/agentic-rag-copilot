@@ -1,0 +1,39 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === Ambienti virtuali ===
+.venv/
+venv/
+env/
+
+# === Segreti e configurazione locale ===
+# Il .env contiene la configurazione della singola macchina: non va MAI versionato.
+# Nel repo pubblichiamo solo .env.example, che ne mostra le chiavi senza i valori.
+.env
+.env.local
+
+# === Dati generati ===
+# Il database vettoriale e' un ARTEFATTO: si rigenera da data/manuals/ con lo
+# script di ingestion. Versionarlo significherebbe committare binari che cambiano
+# a ogni run. Il corpus (data/manuals/) invece resta versionato: e' la sorgente.
+data/chroma/
+
+# === Materiale personale (non parte del progetto pubblico) ===
+PRIMAPARTE.md
+info/CapGemini.md
+info/AMBIENTE.md
+Test_Funzioni/esempio.py
+
+# === macOS ===
+.DS_Store
+
+# === Editor ===
+.vscode/
+.idea/

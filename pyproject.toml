@@ -1,0 +1,40 @@
+[project]
+name = "copilot"
+version = "0.1.0"
+description = "Agentic RAG Copilot — self-corrective retrieval-augmented generation over technical/maintenance documents"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # LangChain core + integrations
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    "langchain-ollama>=0.2",     # ChatOllama + OllamaEmbeddings (local models)
+    "langchain-chroma>=0.1",     # Chroma vector store integration
+    "chromadb>=0.5",             # the vector database itself
+    # Web backend
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    # Config & validation
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    # Document loading
+    "pypdf>=4.0",                # read PDF manuals
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "httpx>=0.27",               # test client for FastAPI
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/copilot"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

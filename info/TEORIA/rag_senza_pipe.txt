@@ -1,0 +1,78 @@
+"""RAG lineare scritto SENZA pipe: ogni passaggio esplicito, con .invoke() a mano.
+
+Fa ESATTAMENTE la stessa cosa di get_rag_chain().invoke(question) in chain.py,
+ma senza l'operatore | — così si vede ogni singolo passo.
+"""
+
+from copilot.llm.provider import get_llm
+from copilot.rag.retriever import get_retriever
+from copilot.rag.chain import PROMPT, format_docs
+from langchain_core.output_parsers import StrOutputParser
+
+
+def answer_esplicito(question: str) -> str:
+    # -------------------------------------------------------------------
+    # PASSO 1 — RETRIEVAL
+    # La chain fa:  "context": get_retriever() | format_docs
+    # A mano:
+    retriever = get_retriever()
+    docs = retriever.invoke(question)          # str -> list[Document]
+    print("PASSO 1  retrieval:", type(docs).__name__, "di", len(docs), "Document")
+
+    # -------------------------------------------------------------------
+    # PASSO 2 — FORMATTAZIONE del contesto
+    # (la seconda metà di  get_retriever() | format_docs)
+    context = format_docs(docs)                # list[Document] -> str
+    print("PASSO 2  format_docs:", type(context).__name__, "di", len(context), "caratteri")
+
+    # -------------------------------------------------------------------
+    # PASSO 3 — COSTRUZIONE del dizionario di input per il prompt
+    # La chain lo fa in parallelo:
+    #   {"context": ..., "question": RunnablePassthrough()}
+    # RunnablePassthrough() = "lascia passare la domanda invariata", cioè:
+    prompt_input = {
+        "context": context,
+        "question": question,                  # <- questo è ciò che fa il passthrough
+    }
+    print("PASSO 3  dict input:", list(prompt_input.keys()))
+
+    # -------------------------------------------------------------------
+    # PASSO 4 — RIEMPIMENTO del prompt template
+    # La chain fa:  ... | PROMPT
+    messages = PROMPT.invoke(prompt_input)     # dict -> messaggi (ChatPromptValue)
+    print("PASSO 4  PROMPT.invoke:", type(messages).__name__)
+    print("         -> contiene", len(messages.to_messages()), "messaggi (system + human)")
+
+    # -------------------------------------------------------------------
+    # PASSO 5 — CHIAMATA all'LLM
+    # La chain fa:  ... | get_llm()
+    llm = get_llm()
+    ai_message = llm.invoke(messages)          # messaggi -> AIMessage
+    print("PASSO 5  llm.invoke:", type(ai_message).__name__)
+
+    # -------------------------------------------------------------------
+    # PASSO 6 — ESTRAZIONE del testo puro
+    # La chain fa:  ... | StrOutputParser()
+    parser = StrOutputParser()
+    text = parser.invoke(ai_message)           # AIMessage -> str
+    print("PASSO 6  StrOutputParser:", type(text).__name__)
+
+    return text
+
+
+if __name__ == "__main__":
+    from copilot.rag.chain import answer as answer_con_pipe
+
+    q = "What grease should I use to lubricate the bearings and how often?"
+
+    print("=" * 70)
+    print("VERSIONE SENZA PIPE (passo per passo)")
+    print("=" * 70)
+    risposta_esplicita = answer_esplicito(q)
+    print("\nRISPOSTA:\n", risposta_esplicita)
+
+    print("\n" + "=" * 70)
+    print("VERSIONE CON PIPE (get_rag_chain, la vera chain.py)")
+    print("=" * 70)
+    risposta_pipe = answer_con_pipe(q)
+    print("\nRISPOSTA:\n", risposta_pipe)
