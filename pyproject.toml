@@ -1,6 +1,6 @@
 [project]
 name = "copilot"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agentic RAG Copilot — self-corrective retrieval-augmented generation over technical/maintenance documents"
 readme = "README.md"
 requires-python = ">=3.11"

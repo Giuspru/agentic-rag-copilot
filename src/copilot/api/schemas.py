@@ -25,13 +25,19 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """The copilot's answer.
-
-    Citations are inside the text for now (the linear chain returns a plain string);
-    structured ``sources`` will come with the agent, whose state holds the documents.
-    """
+    """The copilot's answer, with the documents it rests on and how it got there."""
 
     answer: str = Field(..., description="Answer grounded in the manuals, with citations.")
+    sources: list[str] = Field(
+        default_factory=list,
+        description="Manuals the answer is grounded in (empty if it didn't use them).",
+        examples=[["centrifugal-pump-maintenance-manual.md"]],
+    )
+    steps: list[str] = Field(
+        default_factory=list,
+        description="Trace of the agent's path through the graph.",
+        examples=[["route -> retrieve", "retrieve -> 4 chunks", "grade -> 2/4 relevant"]],
+    )
 
 
 class HealthResponse(BaseModel):

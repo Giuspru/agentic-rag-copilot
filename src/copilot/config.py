@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     chunk_overlap: int = 120       # overlap between consecutive chunks
     retrieval_k: int = 4           # how many chunks to retrieve per question
 
+    # --- Agent (self-correction budget) ---
+    max_rewrites: int = 2          # query rewrites before giving up
+    max_generations: int = 2       # answer attempts before giving up
+
 
 # Single shared instance imported across the app.
 settings = Settings()

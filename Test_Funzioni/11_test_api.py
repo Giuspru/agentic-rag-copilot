@@ -2,14 +2,16 @@
 
 COSA FA L'API
 -------------
-Espone il RAG lineare via HTTP, cosi' qualunque client (browser, curl, un
+Espone l'agente via HTTP, cosi' qualunque client (browser, curl, un
 frontend) puo' fare domande senza importare Python:
 
     GET  /health  -> {"status": "ok"}
-    POST /chat    {"question": "..."} -> {"answer": "..."}
+    POST /chat    {"question": "..."} -> {"answer": "...", "sources": [...],
+                                          "steps": [...]}
 
-Lo strato web e' SOTTILE: valida l'input (schemas.py), chiama answer()
-(il test 10) e impacchetta la risposta. Nessuna logica RAG vive qui.
+Lo strato web e' SOTTILE: valida l'input (schemas.py), chiama l'agente
+(run_agent, test 16) e impacchetta la risposta. Nessuna logica RAG vive qui:
+passando dal RAG lineare all'agente (Fase 2) e' cambiata una sola riga.
 
 COME LO TESTIAMO
 ----------------
@@ -22,8 +24,8 @@ COSA VERIFICHIAMO
 1. /health risponde 200 con {"status": "ok"};
 2. VALIDAZIONE: domanda vuota, mancante o troppo lunga -> 422, e l'LLM non
    viene nemmeno chiamato (ci pensa Pydantic prima del nostro codice);
-3. /chat dentro il corpus -> 200, risposta corretta e citata (come test 10,
-   ma passando da HTTP + JSON);
+3. /chat dentro il corpus -> 200, risposta corretta e citata, con le fonti
+   strutturate (sources) e il percorso dell'agente (steps);
 4. lo schema OpenAPI (quello che alimenta /docs) contiene i due endpoint.
 """
 
@@ -67,6 +69,8 @@ print("     A:", body.get("answer"))
 r_low = body.get("answer", "").lower()
 fatto_grasso = ("nlgi" in r_low) or ("lithium" in r_low)
 cita_fonte   = ("source" in r_low) or (".md" in r_low)
+print("     sources:", body.get("sources"))
+print("     steps:  ", body.get("steps"))
 print("     -> parla del grasso giusto?", fatto_grasso, "| cita fonte?", cita_fonte)
 
 # --- 4. Schema OpenAPI (/docs) ---
@@ -86,7 +90,9 @@ assert all(c == 422 for c in codici.values()), f"validazione fallita: {codici}"
 
 # 3. chat: risposta con la forma giusta, corretta e citata
 assert r_chat.status_code == 200
-assert set(body) == {"answer"}, "la risposta non rispetta ChatResponse!"
+assert set(body) == {"answer", "sources", "steps"}, "la risposta non rispetta ChatResponse!"
+assert body["sources"] == ["centrifugal-pump-maintenance-manual.md"]
+assert body["steps"][0] == "route -> retrieve" and body["steps"][-1] == "check -> useful"
 assert fatto_grasso, "la risposta non parla del grasso!"
 assert cita_fonte, "la risposta non cita la fonte!"
 
@@ -94,7 +100,6 @@ assert cita_fonte, "la risposta non cita la fonte!"
 assert "/health" in percorsi and "/chat" in percorsi
 
 print("[ASSERT] tutte le verifiche superate ✓")
-print("\nRISULTATO: il RAG lineare e' esposto via HTTP.")
+print("\nRISULTATO: l'agente e' esposto via HTTP.")
 print("           Input non validi -> 422 senza toccare l'LLM.")
-print("           Domanda valida   -> risposta citata in JSON.")
-print("\n*** FASE 1 COMPLETA: dalla domanda HTTP alla risposta citata. ***")
+print("           Domanda valida   -> risposta citata + fonti + percorso, in JSON.")
