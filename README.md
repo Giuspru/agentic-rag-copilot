@@ -6,8 +6,8 @@ Sistema **RAG agentico self-corrective** su documentazione tecnica di manutenzio
 costruito con **LangChain / LangGraph**, **FastAPI**, **Chroma** e LLM locali serviti da
 **Ollama**. Nessun cloud, nessuna API key, nessun costo: tutto gira sulla macchina.
 
-> **Stato:** Fase 1 completata (baseline RAG lineare, funzionante end-to-end e testata).
-> Fase 2 (agente self-corrective con LangGraph) in corso.
+> **Stato:** Fase 1 completata (baseline RAG lineare esposta via API FastAPI, funzionante
+> end-to-end e testata). Fase 2 (agente self-corrective con LangGraph) in corso.
 
 ## Perché questo progetto
 
@@ -79,6 +79,10 @@ corregge.
 ```
 src/copilot/
 ├── config.py          # configurazione centralizzata (pydantic-settings, prefisso COPILOT_)
+├── api/
+│   ├── main.py        # l'app FastAPI (entry point per uvicorn)
+│   ├── routes.py      # GET /health, POST /chat
+│   └── schemas.py     # contratto request/response (Pydantic)
 ├── llm/
 │   ├── provider.py    # get_llm()        — factory dell'LLM, model-agnostic
 │   └── embeddings.py  # get_embeddings() — factory del modello di embedding
@@ -89,15 +93,16 @@ src/copilot/
     └── chain.py       # get_rag_chain(), answer() — la chain LCEL
 
 data/manuals/          # corpus sorgente (versionato)
-data/chroma/           # vector DB generato (non versionato: si rigenera con ingest())
+data/chroma/           # vector DB generato (non versionato: si rigenera con scripts/ingest.py)
+scripts/ingest.py      # comando per (ri)popolare il vector store
 Test_Funzioni/         # uno script di test per funzione, in ordine bottom-up
 info/                  # documenti di design e note di studio
 img/                   # immagini del progetto
 ```
 
 Il criterio è la **separazione delle responsabilità**: `llm/` conosce solo i modelli,
-`rag/` solo il recupero della conoscenza, `config.py` è l'unico posto dove vivono i
-parametri. Ogni modulo è testabile da solo.
+`rag/` solo il recupero della conoscenza, `api/` solo il protocollo HTTP, `config.py` è
+l'unico posto dove vivono i parametri. Ogni modulo è testabile da solo.
 
 ## Avvio rapido
 
@@ -112,11 +117,32 @@ ollama pull nomic-embed-text
 pip install -e ".[dev]"
 
 # 3. costruisci il vector store a partire da data/manuals/
-python -c "from copilot.rag.ingestion import ingest; print(ingest())"
+python scripts/ingest.py
 
-# 4. fai una domanda
-python -c "from copilot.rag.chain import answer; print(answer('What grease should I use for the bearings?'))"
+# 4. avvia l'API
+uvicorn copilot.api.main:app --reload
 ```
+
+Poi apri <http://localhost:8000/docs> per provare l'API dal browser, oppure:
+
+```bash
+curl -X POST localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What grease should I use for the bearings?"}'
+```
+
+```json
+{"answer": "According to Section 5 of the manual (source: centrifugal-pump-maintenance-manual.md), you should use a lithium-complex grease with NLGI grade 2 ..."}
+```
+
+| Endpoint | Metodo | Descrizione |
+|---|---|---|
+| `/health` | GET | Liveness check → `{"status": "ok"}` |
+| `/chat` | POST | `{"question": "..."}` → `{"answer": "..."}`, risposta fondata sui manuali e citata |
+| `/docs` | GET | Documentazione interattiva (Swagger), generata automaticamente |
+
+Le domande vuote, mancanti o più lunghe di 2000 caratteri vengono rifiutate con `422`
+prima di raggiungere l'LLM.
 
 La configurazione è opzionale: ogni parametro ha un default sensato. Per modificarli,
 copia `.env.example` in `.env`.
@@ -130,7 +156,7 @@ copia `.env.example` in `.env`.
 
 | Fase | Focus | Stato |
 |---|---|---|
-| 1 | Baseline RAG lineare (ingestion, retrieval, chain LCEL, citazioni) | ✅ completata |
+| 1 | Baseline RAG lineare (ingestion, retrieval, chain LCEL, citazioni, API FastAPI) | ✅ completata |
 | 2 | Agente self-corrective con LangGraph (route / grade / generate / check) | 🔜 prossima |
 | 3 | Guardrail, gestione errori, tracing con Phoenix | prevista |
 | 4 | Dataset di valutazione (ragas + trajectory eval) e CI/CD | prevista |
