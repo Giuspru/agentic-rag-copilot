@@ -1,6 +1,6 @@
 [project]
 name = "copilot"
-version = "0.2.0"
+version = "0.3.0"
 description = "Agentic RAG Copilot — self-corrective retrieval-augmented generation over technical/maintenance documents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -11,6 +11,9 @@ dependencies = [
     "langchain-ollama>=0.2",     # ChatOllama + OllamaEmbeddings (local models)
     "langchain-chroma>=0.1",     # Chroma vector store integration
     "chromadb>=0.5",             # the vector database itself
+    "langgraph>=1.0",            # the agent graph (imported directly: declare it)
+    "ollama>=0.4",               # its error types are translated in errors.py
+    "httpx>=0.27",               # HTTP client: timeouts, readiness check
     # Web backend
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -22,10 +25,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Tracing client (OpenTelemetry + OpenInference). The Phoenix *server* is installed
+# separately, in its own environment: see the README.
+tracing = [
+    "arize-phoenix-otel>=0.10",
+    "openinference-instrumentation-langchain>=0.1.30",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
-    "httpx>=0.27",               # test client for FastAPI
 ]
 
 [build-system]

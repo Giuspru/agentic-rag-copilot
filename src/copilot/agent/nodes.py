@@ -5,11 +5,18 @@ the state, does one job, and returns only the keys it changes (plus a line for t
 ``steps`` trace). Nodes do the work; *which* node runs next is decided in ``graph.py``.
 
 Several nodes use the LLM as a **judge** rather than as a writer: routing the question,
-grading each retrieved chunk, checking the answer. For those we use structured output
+grading each retrieved chunk, checking the answer. Most judges use structured output
 (``with_structured_output``): the model must reply with JSON matching a Pydantic schema,
 so the graph branches on a reliable ``"yes"``/``"no"`` instead of parsing free text.
+
+The exception is the groundedness judge, measured in phase 3: with the JSON schema it
+rejected 5 correct answers out of 14 (even answers copied verbatim from the manual);
+with the same prompt answering in plain text, 14/14 — and it still rejected all 14
+invented answers. On a 3B model, constrained decoding was hurting the judgment. Its
+plain-text reply is parsed conservatively: anything but a clear "yes" counts as "no".
 """
 
+import re
 from typing import Literal
 
 from langchain_core.documents import Document
@@ -19,6 +26,7 @@ from langchain_core.runnables import Runnable
 from pydantic import BaseModel, Field
 
 from copilot.agent.state import AgentState
+from copilot.guardrails.groundedness import unsupported_claims
 from copilot.llm.provider import get_llm
 from copilot.rag.chain import SYSTEM_PROMPT, format_docs
 from copilot.rag.retriever import get_retriever
@@ -157,7 +165,7 @@ GROUNDED_PROMPT = ChatPromptTemplate.from_messages(
             "that does NOT appear in the facts.\n"
             "Ignore citations, section numbers and file names: they are not claims.",
         ),
-        ("human", "Facts:\n{context}\n\nAnswer: {generation}"),
+        ("human", "Facts:\n{context}\n\nAnswer: {generation}\n\nReply with one word: yes or no."),
     ]
 )
 
@@ -190,6 +198,20 @@ def _judge(prompt: ChatPromptTemplate, schema: type[BaseModel]) -> Runnable:
 def _writer(prompt: ChatPromptTemplate) -> Runnable:
     """Prompt + LLM returning plain text."""
     return prompt | get_llm() | StrOutputParser()
+
+
+_YES_NO_RE = re.compile(r"\b(yes|no)\b", re.IGNORECASE)
+
+
+def parse_yes_no(text: str) -> Literal["yes", "no"]:
+    """First "yes"/"no" word of a free-text reply; no clear "yes" -> "no" (prudence)."""
+    match = _YES_NO_RE.search(text)
+    return "yes" if match and match.group(1).lower() == "yes" else "no"
+
+
+def _yes_no_judge(prompt: ChatPromptTemplate) -> Runnable:
+    """Prompt + LLM replying in plain text, parsed to "yes"/"no"."""
+    return _writer(prompt) | parse_yes_no
 
 
 # --- Nodes ----------------------------------------------------------------------------
@@ -285,15 +307,25 @@ def generate(state: AgentState) -> AgentState:
 def check_answer(state: AgentState) -> AgentState:
     """Self-RAG check: is the answer grounded in the chunks, and does it answer?
 
-    Two separate judges, because they catch different failures: a grounded answer can
-    still miss the point, and an on-topic answer can still invent a number. As in
-    grading, the second judge compares the answer with the English query: cross-language
-    judgments are where a 3B model is least reliable.
+    Three checks, cheapest first, because they catch different failures:
+      1. deterministic (guardrail): every number, part code and cited file in the answer
+         must appear in the chunks — exact facts are where the LLM judge is weakest;
+      2. LLM judge "grounded" (plain-text yes/no, see the module docstring): no
+         unsupported cause or action, paraphrase allowed;
+      3. LLM judge "answers": a grounded answer can still miss the point.
+    As in grading, the last judge compares the answer with the English query:
+    cross-language judgments are where a 3B model is least reliable.
     """
-    grounded = _judge(GROUNDED_PROMPT, BinaryScore).invoke(
-        {"context": format_docs(state["documents"]), "generation": state["generation"]}
+    context = format_docs(state["documents"])
+    unsupported = unsupported_claims(state["generation"], context)
+    if unsupported:
+        listed = ", ".join(unsupported[:5])
+        return {"verdict": "not_grounded", "steps": [f"check -> not_grounded ({listed})"]}
+
+    grounded = _yes_no_judge(GROUNDED_PROMPT).invoke(
+        {"context": context, "generation": state["generation"]}
     )
-    if grounded.binary_score == "no":
+    if grounded == "no":
         verdict = "not_grounded"
     else:
         answers = _judge(ANSWERS_PROMPT, BinaryScore).invoke(

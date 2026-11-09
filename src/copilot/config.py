@@ -39,6 +39,17 @@ class Settings(BaseSettings):
     max_rewrites: int = 2          # query rewrites before giving up
     max_generations: int = 2       # answer attempts before giving up
 
+    # --- Robustness (calls to Ollama) ---
+    llm_timeout: float = 120.0     # seconds to wait for Ollama without receiving any data
+    llm_max_attempts: int = 3      # attempts per node on transient errors (1 = no retry)
+
+    # --- Observability ---
+    log_level: str = "INFO"
+    # Arize Phoenix tracing (optional)
+    tracing_enabled: bool = False  # off by default: the app runs without a Phoenix server
+    phoenix_endpoint: str = "http://localhost:6006/v1/traces"
+    phoenix_project: str = "agentic-rag-copilot"
+
 
 # Single shared instance imported across the app.
 settings = Settings()

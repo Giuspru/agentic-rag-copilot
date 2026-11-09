@@ -19,4 +19,5 @@ def get_embeddings() -> OllamaEmbeddings:
     return OllamaEmbeddings(
         model=settings.embedding_model,
         base_url=settings.ollama_base_url,
+        client_kwargs={"timeout": settings.llm_timeout},  # see get_llm()
     )

@@ -6,9 +6,11 @@ Sistema **RAG agentico self-corrective** su documentazione tecnica di manutenzio
 costruito con **LangChain / LangGraph**, **FastAPI**, **Chroma** e LLM locali serviti da
 **Ollama**. Nessun cloud, nessuna API key, nessun costo: tutto gira sulla macchina.
 
-> **Stato:** Fase 2 completata. L'agente self-corrective (LangGraph) valuta i documenti
-> recuperati, riformula la ricerca, controlla le proprie risposte ed è esposto via API
-> FastAPI. Prossima: robustezza e observability (Fase 3).
+> **Stato:** Fase 3 completata. L'agente self-corrective (LangGraph) valuta i documenti
+> recuperati, riformula la ricerca e controlla le proprie risposte. È protetto da
+> guardrail di input e di output, gestisce i guasti di Ollama con retry ed errori HTTP
+> chiari, ed è osservabile passo per passo con Arize Phoenix. Prossima: valutazione
+> automatica e CI/CD (Fase 4).
 
 ## Perché questo progetto
 
@@ -92,7 +94,7 @@ graph TD;
 | `grade_documents` | giudice | Valuta ogni chunk (sì/no) e tiene solo quelli rilevanti (passo *corrective* di CRAG) |
 | `rewrite_query` | scrittore | Nessun chunk rilevante → riformula la query in inglese tecnico (e traduce le domande in italiano) |
 | `generate` | scrittore | Risponde usando **solo** i chunk rilevanti; al secondo tentativo con un prompt più severo |
-| `check_answer` | 2 giudici | Self-RAG: la risposta è fondata sui chunk? Risponde alla domanda? |
+| `check_answer` | controllo deterministico + 2 giudici | Self-RAG: numeri, codici e file citati sono nei chunk? La risposta è fondata? Risponde alla domanda? |
 | `fallback` | — | Tentativi esauriti → "I don't know" fisso, senza improvvisare |
 
 La differenza rispetto al RAG lineare sta tutta nelle frecce che **tornano indietro**:
@@ -112,16 +114,108 @@ Due scelte di design:
   manuali. I prompt dei giudici sono stati tarati su piccoli banchi di prova etichettati
   a mano (es. fondatezza: da 5/9 a 8/9 casi corretti, con 0 risposte inventate promosse).
 
+## Robustezza e osservabilità (Fase 3)
+
+### Guardrail
+
+Due controlli **deterministici** (niente LLM: istantanei, gratuiti, mai sbagliati nel modo
+in cui sbaglia un modello) affiancano i giudici LLM del grafo:
+
+- **Input** (`guardrails/validators.py`), prima dell'agente: normalizza la domanda
+  (Unicode NFKC, caratteri di controllo, spazi) e blocca i *prompt injection* evidenti
+  ("ignore previous instructions", "rivela il tuo prompt", i token speciali di Llama 3
+  come `<|eot_id|>`...), in inglese e in italiano. Una domanda bloccata non costa nessuna
+  chiamata all'LLM. I pattern sono tarati per non bloccare domande legittime: in un
+  dominio di manutenzione *"show me the instructions for seal replacement"* è una
+  domanda normale. È una prima linea, non *la* difesa: la protezione vera è
+  l'architettura (nessun tool, risposte solo dai chunk, controllo di fondatezza).
+- **Output** (`guardrails/groundedness.py`), dentro `check_answer` e prima dei giudici
+  LLM: ogni **numero**, **codice ricambio** e **file citato** nella risposta deve
+  comparire nei chunk. Il giudice LLM è bravo con le parafrasi e scarso con
+  l'esattezza; un confronto tra stringhe non accetta mai "5000 ore" se il manuale dice
+  4000. `4000`, `4,000` e l'italiano `4.000` sono riconosciuti come lo stesso numero.
+
+### La taratura: misurare, non indovinare
+
+Su 10 domande nuove (tutte con risposta nel manuale) l'agente della Fase 2 rispondeva
+correttamente solo a **6**: le altre 4 finivano in "non lo so", anche con risposte copiate
+parola per parola dal manuale. Il banco di prova della Fase 2 (9 casi) era troppo piccolo
+per accorgersene. Con un banco costruito sui contesti reali dell'agente (14 risposte
+corrette verificate a mano + 14 inventate), il giudice di fondatezza:
+
+| Variante | Corrette accettate | Inventate bocciate |
+|---|---|---|
+| output JSON vincolato (Fase 2) | 9/14 | 14/14 |
+| JSON + citazioni rimosse | 7/14 | 14/14 |
+| JSON + "copia la frase che lo prova" | 9/14 | 14/14 |
+| **stesso prompt, risposta in testo libero "yes/no"** | **14/14** | **14/14** |
+
+Sul modello da 3B la decodifica vincolata dallo schema JSON peggiorava il giudizio: il
+giudice di fondatezza ora risponde in testo libero, interpretato in modo prudente (senza
+un "yes" chiaro vale "no"). Nella stessa analisi è emerso che il modello copiava
+l'esempio del prompt `(source: manual.md)` e citava un file inesistente in 5 risposte su
+14. Senza esempio, invece, a volte dimenticava di citare. Con un formato segnaposto,
+`(source: <file name>)` + "copia il nome esatto dal contesto": 15/15 risposte citate,
+tutte con il nome giusto. Risultato sulle 10 domande: **da 6/10 a 10/10**, e
+risposte più rapide (meno cicli di autocorrezione inutili).
+
+### Gestione degli errori
+
+La stessa causa produce eccezioni diverse a seconda della libreria (con Ollama spento il
+modello di chat solleva `httpx.ConnectError`, quello di embedding `ConnectionError`).
+`errors.py` le traduce in pochi **errori di dominio**, ognuno con il suo status HTTP:
+
+| Situazione | Risposta |
+|---|---|
+| Ollama irraggiungibile o modello non scaricato | `503` `llm_unavailable` + header `Retry-After` |
+| Ollama non risponde entro `COPILOT_LLM_TIMEOUT` | `504` `llm_timeout` |
+| Domanda bloccata dal guardrail di input | `400` `input_rejected` |
+| Domanda vuota, di soli spazi o troppo lunga | `422` (validazione Pydantic) |
+| Bug imprevisto | `500` `internal_error`, senza dettagli interni (stack trace solo nel log) |
+
+- **Retry per nodo** con il `RetryPolicy` di LangGraph (backoff esponenziale), solo per
+  gli errori transitori. Non si riprovano i timeout (moltiplicherebbero l'attesa) né i
+  modelli mancanti (nessun retry li scarica). È sicuro perché i nodi sono
+  **idempotenti**: leggono lo stato e restituiscono un aggiornamento.
+- **Limite di ricorsione calcolato dai budget** (`max_graph_steps()`: 22 passi nel caso
+  peggiore). Il default di LangGraph 1.x è 10007: se un bug rompesse un budget, l'agente
+  farebbe migliaia di chiamate LLM (ore) prima di fermarsi. Con il limite calcolato si
+  ferma dopo pochi passi, in modo visibile.
+- **`/health` vs `/ready`**: il primo dice che il processo è vivo; il secondo controlla
+  che Ollama risponda con entrambi i modelli scaricati e che l'indice non sia vuoto, ed
+  è quello che un orchestratore usa per decidere se mandare traffico.
+
+### Tracing con Arize Phoenix
+
+I `steps` dicono *quali* nodi sono girati; una traccia mostra tutto il resto: per ogni
+nodo il prompt esatto, la risposta grezza del modello, i chunk recuperati, i token e la
+latenza, annidati ad albero (grafo → nodo → catena → chiamata LLM). La strumentazione è
+**OpenTelemetry + OpenInference**, che si aggancia ai callback di LangChain senza
+toccare il codice dell'agente. Phoenix gira in locale, in linea con il resto del
+progetto. Il tracing è disattivato di default: l'app non dipende da un server di
+monitoraggio acceso.
+
+Già il primo albero di span è istruttivo: su una domanda da ~10 s, `grade_documents` ne
+occupa ~4 (quattro chiamate LLM in sequenza, una per chunk): è il primo candidato da
+ottimizzare.
+
+Ogni risposta HTTP porta anche `X-Request-ID` (generato o ripreso dal client) e
+`X-Process-Time`; il request ID compare in ogni riga di log della richiesta.
+
 ### Limiti noti
 
 L'agente è tarato per la **precisione**: preferisce dire "non lo so" piuttosto che
-rispondere senza supporto. Il prezzo sono alcuni **falsi negativi** sulle domande che
-richiedono di collegare punti diversi del manuale. Per esempio, a *"How often should I
-check the coupling alignment?"* l'agente risponde "I don't know", mentre il RAG lineare dà
-una risposta parziale (§8, "dopo ogni intervento sul giunto"). Inoltre la comprensione
-dell'italiano dipende dal modello locale da 3B (es. "giunto" tradotto con *bearing*
-invece di *coupling*). Misurare questi compromessi in modo sistematico è il compito della
-Fase 4 (eval).
+rispondere senza supporto. Il prezzo sono alcuni **falsi negativi** e alcuni percorsi
+inutilmente lunghi. Esempio dalle 10 domande di taratura: per *"How often should the
+mechanical seal be replaced?"* la risposta finale è giusta (8000 ore), ma ci arriva in
+~30 s invece di ~10: il grader scarta il chunk giusto (§4) e la riscrittura aggiunge
+"excessive vibration and leakage", parole prese dall'esempio nel prompt di riscrittura.
+È lo stesso difetto della citazione `manual.md`: il modello da 3B copia gli esempi dei
+prompt. Anche le domande che richiedono di collegare punti diversi del manuale (es.
+*"How often should I check the coupling alignment?"*) restano difficili. Inoltre la
+comprensione dell'italiano dipende dal modello locale da 3B. Misurare questi compromessi
+in modo sistematico è il compito della Fase 4 (eval), che verificherà anche se gli altri
+giudici traggono lo stesso vantaggio dal testo libero.
 
 ## Stack tecnologico
 
@@ -133,7 +227,8 @@ Fase 4 (eval).
 | Vector store | Chroma (persistito su disco) |
 | Backend API | FastAPI |
 | Configurazione | pydantic-settings |
-| Eval / Observability | ragas + Arize Phoenix *(previsti)* |
+| Observability | Arize Phoenix (OpenTelemetry + OpenInference), logging con request ID |
+| Eval | ragas + trajectory eval *(previsti)* |
 | CI | GitHub Actions *(prevista)* |
 
 ## Struttura del progetto
@@ -141,17 +236,25 @@ Fase 4 (eval).
 ```
 src/copilot/
 ├── config.py          # configurazione centralizzata (pydantic-settings, prefisso COPILOT_)
+├── errors.py          # errori di dominio (503/504/400) e traduzione delle eccezioni di Ollama
 ├── agent/
 │   ├── state.py       # AgentState — la memoria di lavoro che scorre tra i nodi
 │   ├── nodes.py       # i nodi: route, retrieve, grade, rewrite, generate, check, fallback
-│   └── graph.py       # il grafo LangGraph (archi condizionali) + run_agent()
+│   └── graph.py       # il grafo LangGraph (archi condizionali, retry, limite) + run_agent()
 ├── api/
-│   ├── main.py        # l'app FastAPI (entry point per uvicorn)
-│   ├── routes.py      # GET /health, POST /chat
-│   └── schemas.py     # contratto request/response (Pydantic)
+│   ├── main.py        # l'app FastAPI: startup, middleware request ID, exception handler
+│   ├── routes.py      # GET /health, GET /ready, POST /chat
+│   └── schemas.py     # contratto request/response/errore (Pydantic)
+├── guardrails/
+│   ├── validators.py  # input: normalizzazione + filtro prompt injection
+│   └── groundedness.py# output: numeri, codici e file citati devono essere nei chunk
 ├── llm/
 │   ├── provider.py    # get_llm()        — factory dell'LLM, model-agnostic
 │   └── embeddings.py  # get_embeddings() — factory del modello di embedding
+├── observability/
+│   ├── tracing.py     # setup_tracing() — OpenTelemetry/OpenInference verso Phoenix
+│   ├── logs.py        # setup_logging() — log con request ID (ContextVar)
+│   └── health.py      # controlli di readiness (Ollama + modelli, indice non vuoto)
 └── rag/
     ├── ingestion.py   # load_documents(), split_documents(), ingest()
     ├── vectorstore.py # get_vectorstore() — connessione a Chroma
@@ -162,14 +265,15 @@ data/manuals/          # corpus sorgente (versionato)
 data/chroma/           # vector DB generato (non versionato: si rigenera con scripts/ingest.py)
 scripts/ingest.py      # comando per (ri)popolare il vector store
 scripts/compare.py     # prima/dopo: RAG lineare vs agente, fianco a fianco
-Test_Funzioni/         # uno script di test per funzione, in ordine bottom-up (01–16)
+Test_Funzioni/         # uno script di test per funzione, in ordine bottom-up (01–20)
 info/                  # documenti di design e note di studio
 img/                   # immagini del progetto
 ```
 
 Il criterio è la **separazione delle responsabilità**: `llm/` conosce solo i modelli,
 `rag/` solo il recupero della conoscenza, `agent/` solo il controllo di flusso, `api/`
-solo il protocollo HTTP, `config.py` è l'unico posto dove vivono i parametri. Ogni modulo
+solo il protocollo HTTP, `guardrails/` e `observability/` sono trasversali,
+`config.py` è l'unico posto dove vivono i parametri. Ogni modulo
 è testabile da solo. Nel passaggio dal RAG lineare all'agente, nello strato API è
 cambiata una sola riga.
 
@@ -217,11 +321,37 @@ curl -X POST localhost:8000/chat \
 | Endpoint | Metodo | Descrizione |
 |---|---|---|
 | `/health` | GET | Liveness check → `{"status": "ok"}` |
+| `/ready` | GET | Readiness check: `200` se Ollama (con i modelli) e l'indice sono pronti, altrimenti `503` con il dettaglio di ogni controllo |
 | `/chat` | POST | `{"question": "..."}` → `answer` fondata sui manuali e citata, `sources` (i manuali usati) e `steps` (il percorso dell'agente nel grafo) |
 | `/docs` | GET | Documentazione interattiva (Swagger), generata automaticamente |
 
-Le domande vuote, mancanti o più lunghe di 2000 caratteri vengono rifiutate con `422`
-prima di raggiungere l'LLM.
+Le domande vuote, mancanti o più lunghe di 2000 caratteri vengono rifiutate con `422`,
+quelle bloccate dal guardrail con `400`, in entrambi i casi prima di raggiungere l'LLM.
+Gli errori hanno sempre la stessa forma: `{"error": "llm_unavailable", "detail": "..."}`.
+
+### Tracing (opzionale)
+
+Il server Phoenix va in un ambiente separato: porta con sé molte dipendenze (pandas,
+SQLAlchemy, ...) che l'app non deve avere, ed è così anche in produzione, dove il
+collector delle tracce è un servizio a parte. Nell'ambiente dell'app serve solo il lato
+client (`.[tracing]`: OpenTelemetry + OpenInference).
+
+```bash
+# ambiente separato per il server Phoenix
+conda create -n phoenix python=3.11 && conda activate phoenix
+pip install arize-phoenix "cryptography<46"   # vedi nota sotto
+phoenix serve                       # UI su http://localhost:6006
+
+# nell'ambiente del progetto
+pip install -e ".[tracing]"
+COPILOT_TRACING_ENABLED=true uvicorn copilot.api.main:app
+```
+
+Ogni domanda a `/chat` diventa una traccia nel progetto `agentic-rag-copilot` di Phoenix.
+
+> Nota (conda su macOS): `cryptography` ≥ 46 cerca a runtime simboli di OpenSSL 3.5,
+> mentre il Python di conda carica la sua OpenSSL 3.0 (errore `symbol not found in flat
+> namespace '_OSSL_get_max_threads'`). Il vincolo `cryptography<46` lo evita.
 
 Per vedere il prima/dopo, RAG lineare e agente sulle stesse domande:
 
@@ -231,7 +361,8 @@ python scripts/compare.py "la pompa vibra molto"  # domande tue
 ```
 
 La configurazione è opzionale: ogni parametro ha un default sensato (compresi i budget
-di autocorrezione `COPILOT_MAX_REWRITES` e `COPILOT_MAX_GENERATIONS`). Per modificarli,
+di autocorrezione `COPILOT_MAX_REWRITES` e `COPILOT_MAX_GENERATIONS`, il timeout
+`COPILOT_LLM_TIMEOUT` e i tentativi `COPILOT_LLM_MAX_ATTEMPTS`). Per modificarli,
 copia `.env.example` in `.env`.
 
 > Il corpus e i prompt sono in **inglese** per una ragione tecnica: i test sugli
@@ -246,8 +377,8 @@ copia `.env.example` in `.env`.
 |---|---|---|
 | 1 | Baseline RAG lineare (ingestion, retrieval, chain LCEL, citazioni, API FastAPI) | ✅ completata |
 | 2 | Agente self-corrective con LangGraph (route / grade / rewrite / generate / check) | ✅ completata |
-| 3 | Guardrail, gestione errori, tracing con Phoenix | 🔜 prossima |
-| 4 | Dataset di valutazione (ragas + trajectory eval) e CI/CD | prevista |
+| 3 | Guardrail di input/output, gestione errori (retry, 503/504), readiness, tracing con Phoenix | ✅ completata |
+| 4 | Dataset di valutazione (ragas + trajectory eval) e CI/CD | 🔜 prossima |
 | 5 | Opzionali: tool verso sistemi esterni (CMMS), Docker/K8s, framework alternativi | futura |
 
 ## Documentazione

@@ -16,6 +16,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable, RunnablePassthrough
 
+from copilot.errors import llm_errors
 from copilot.llm.provider import get_llm
 from copilot.rag.retriever import get_retriever
 
@@ -27,8 +28,13 @@ SYSTEM_PROMPT = (
     "- If the context does not contain the answer, say you don't know. Never invent "
     "facts, numbers, or part codes.\n"
     "- Be concise and practical.\n"
-    "- Cite the source document(s) you used, e.g. (source: manual.md)."
+    "- End the answer with the source document, written as (source: <file name>), "
+    "copying the exact file name shown after 'Source:' in the context."
 )
+# The citation rule once read "e.g. (source: manual.md)": the 3B model copied the example
+# and cited a file that does not exist in 5 answers out of 14. Without a format it
+# sometimes forgot to cite. A placeholder format plus "copy the exact name": 15/15 cited,
+# 15/15 with the right file name (phase 3, see guardrails/groundedness.py).
 
 PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -71,5 +77,9 @@ def get_rag_chain() -> Runnable:
 
 
 def answer(question: str) -> str:
-    """Convenience wrapper: run the RAG chain on a question and return the answer text."""
-    return get_rag_chain().invoke(question)
+    """Convenience wrapper: run the RAG chain on a question and return the answer text.
+
+    Ollama errors are translated into domain errors, as in the agent (see ``errors.py``).
+    """
+    with llm_errors():
+        return get_rag_chain().invoke(question)
