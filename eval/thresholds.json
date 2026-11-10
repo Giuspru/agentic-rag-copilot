@@ -1,0 +1,11 @@
+{
+  "split": "test",
+  "agent": {
+    "min_accuracy": 0.70,
+    "min_answer_accuracy": 0.65,
+    "min_refusal_accuracy": 0.85,
+    "min_direct_accuracy": 0.66,
+    "max_wrong_answers": 1,
+    "max_hallucination_rate": 0.03
+  }
+}

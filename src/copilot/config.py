@@ -31,17 +31,17 @@ class Settings(BaseSettings):
     collection_name: str = "maintenance_manuals"
 
     # --- RAG parameters ---
-    chunk_size: int = 800          # characters per chunk
-    chunk_overlap: int = 120       # overlap between consecutive chunks
-    retrieval_k: int = 4           # how many chunks to retrieve per question
+    chunk_size: int = 800  # characters per chunk
+    chunk_overlap: int = 120  # overlap between consecutive chunks
+    retrieval_k: int = 4  # how many chunks to retrieve per question
 
     # --- Agent (self-correction budget) ---
-    max_rewrites: int = 2          # query rewrites before giving up
-    max_generations: int = 2       # answer attempts before giving up
+    max_rewrites: int = 2  # query rewrites before giving up
+    max_generations: int = 2  # answer attempts before giving up
 
     # --- Robustness (calls to Ollama) ---
-    llm_timeout: float = 120.0     # seconds to wait for Ollama without receiving any data
-    llm_max_attempts: int = 3      # attempts per node on transient errors (1 = no retry)
+    llm_timeout: float = 120.0  # seconds to wait for Ollama without receiving any data
+    llm_max_attempts: int = 3  # attempts per node on transient errors (1 = no retry)
 
     # --- Observability ---
     log_level: str = "INFO"

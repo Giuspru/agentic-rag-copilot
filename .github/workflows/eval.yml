@@ -1,0 +1,66 @@
+# Evaluation — the real local models on a GitHub runner, with a quality gate.
+#
+# Installs Ollama, pulls the two models, builds the index, runs the integration tests
+# and evaluates the agent on the held-out test split. The job FAILS if the agent drops
+# below eval/thresholds.json. The full report is uploaded as an artifact.
+#
+# GitHub runners have no GPU: on CPU each LLM call takes seconds instead of a fraction,
+# so the job takes about an hour and runs only when something that can change the
+# agent's behavior changes (code, prompts, dataset, thresholds), on demand, and weekly
+# (to catch drift in dependencies or in the models). Results on CPU can differ slightly
+# from an Apple-silicon laptop: the thresholds keep a margin.
+
+name: Evaluation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "eval/**"
+      - "data/manuals/**"
+      - "pyproject.toml"
+      - ".github/workflows/eval.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # every Monday
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evaluation:
+    name: Integration tests + evaluation gate (Ollama on CPU)
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      COPILOT_LLM_TIMEOUT: "300" # CPU inference: allow longer silences than on a laptop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install the project
+        run: pip install -e ".[dev]"
+      - name: Install and start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/tags && break; sleep 2; done
+      - name: Pull the local models
+        run: |
+          ollama pull llama3.2:3b
+          ollama pull nomic-embed-text
+      - name: Build the vector store
+        run: python scripts/ingest.py
+      - name: Integration tests
+        run: pytest tests/integration -q
+      - name: Evaluation (test split) + quality gate
+        run: python scripts/evaluate.py --system agent --split test --gate --out eval-report
+      - name: Upload the evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report
+          path: eval-report/

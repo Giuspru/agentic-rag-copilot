@@ -1,16 +1,18 @@
 # Agentic RAG Copilot
 
+[![CI](https://github.com/Giuspru/agentic-rag-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/Giuspru/agentic-rag-copilot/actions/workflows/ci.yml) [![Evaluation](https://github.com/Giuspru/agentic-rag-copilot/actions/workflows/eval.yml/badge.svg)](https://github.com/Giuspru/agentic-rag-copilot/actions/workflows/eval.yml)
+
 ![Agentic RAG Copilot — dal manuale tecnico ai chunk vettoriali, fino alla risposta citata, interamente in locale](img/01.png)
 
 Sistema **RAG agentico self-corrective** su documentazione tecnica di manutenzione,
 costruito con **LangChain / LangGraph**, **FastAPI**, **Chroma** e LLM locali serviti da
 **Ollama**. Nessun cloud, nessuna API key, nessun costo: tutto gira sulla macchina.
 
-> **Stato:** Fase 3 completata. L'agente self-corrective (LangGraph) valuta i documenti
-> recuperati, riformula la ricerca e controlla le proprie risposte. È protetto da
-> guardrail di input e di output, gestisce i guasti di Ollama con retry ed errori HTTP
-> chiari, ed è osservabile passo per passo con Arize Phoenix. Prossima: valutazione
-> automatica e CI/CD (Fase 4).
+> **Stato:** Fase 4 completata. L'agente self-corrective (LangGraph) valuta i documenti
+> recuperati, riformula la ricerca e controlla le proprie risposte; è protetto da
+> guardrail, gestisce i guasti di Ollama ed è osservabile con Arize Phoenix. Viene
+> **misurato** su un dataset di 72 domande etichettate, e ogni modifica passa da una CI
+> con quality gate. [Risultati →](#valutazione-fase-4)
 
 ## Perché questo progetto
 
@@ -202,20 +204,119 @@ ottimizzare.
 Ogni risposta HTTP porta anche `X-Request-ID` (generato o ripreso dal client) e
 `X-Process-Time`; il request ID compare in ogni riga di log della richiesta.
 
+## Valutazione (Fase 4)
+
+Il sistema è misurato su **72 domande etichettate** (`eval/dataset.jsonl`) con metriche
+**deterministiche**: nessun giudice LLM nel punteggio, quindi risultati esatti e
+riproducibili. Per ogni domanda: comportamento atteso (rispondere, rifiutare, salutare),
+fatti che la risposta deve contenere, fonte attesa. Categorie: fatti, più sezioni,
+italiano, fuori corpus, domande del dominio a cui il manuale non risponde, chiacchiera.
+
+Tre split, per non barare:
+
+| Split | Domande | Ruolo |
+|---|---|---|
+| `dev` | 23 | tarare i prompt (punteggi ottimisti per costruzione) |
+| `test` | 34 | misura di riferimento, controllata dal quality gate in CI |
+| `holdout` | 15 | scritto **prima** di ogni modifica della Fase 4, valutato una sola volta alla fine |
+
+### Risultati (v0.4.0, `llama3.2:3b` locale)
+
+| | Holdout (15) | | Test (34) | |
+|---|---|---|---|---|
+| | **lineare** | **agente** | **lineare** | **agente** |
+| Accuratezza | 100% | 93% | 94% | 85% |
+| Domande senza risposta rifiutate correttamente | 100% | 100% | 100% | 100% |
+| Rifiuti sbagliati (errore *prudente*) | 0 | 1 | 2 | 5 |
+| Risposte sbagliate date con sicurezza (errore *pericoloso*) | 0 | **0** | 0 | **0** |
+| Risposte con numeri, codici o fonti inventati | 0% | **0%** | 3% | **0%** |
+| Latenza media | 3,5 s | 9,9 s | 3,7 s | 11,4 s |
+| Chiamate LLM per domanda | 1 | 8,5 | 1 | 10,0 |
+
+Su tutte le 72 domande: lineare 93% / agente 88%. Per categoria: **fatti** 98% / 83%,
+**italiano** 60% / **90%**, **più sezioni** 100% / 80%. Report completo, con ogni risposta e ogni percorso:
+[`eval/results/report.md`](eval/results/report.md).
+
+**Come leggerli.** Su questo corpus (un manuale ben strutturato, domande per lo più
+fattuali) il RAG lineare è **più accurato e 3 volte più veloce**. L'agente vince dove è
+stato progettato per vincere: **le domande in italiano** (la riscrittura traduce) e la
+**sicurezza**. Su tutte le 72 domande non dà mai una risposta sbagliata con sicurezza e
+non inventa mai numeri, codici o fonti; i suoi 9 errori sono tutti "non lo so". Il
+lineare, nello stesso set, ha inventato una procedura (`dev-20`) e citato un manuale
+inesistente (`test-25`). Quale compromesso sia giusto dipende dal costo dei due errori,
+e lo decide chi usa il sistema. Con 34 domande, differenze di 1–2 risposte sono dentro
+il rumore statistico.
+
+### Cosa ha insegnato la taratura (solo sul dev)
+
+- **ragas non funziona con un giudice locale da 3B.** La metrica *faithfulness*
+  chiede al giudice un JSON di affermazioni: llama3.2:3b risponde con codice Python
+  (`NaN` su 4 righe su 4), qwen3:4b va in timeout (> 120 s per chiamata). Per questo le
+  metriche sono deterministiche.
+- **"JSON o testo libero" non è una regola generale.** Per il giudice di fondatezza il
+  testo libero era meglio (Fase 3); per il grader tiene 2 chunk rilevanti su 19 contro
+  15/19 del JSON. Va misurato giudice per giudice.
+- **L'ordine del prompt conta.** Con la domanda *prima* del chunk il grader crolla a
+  3/19. La riga "Be strict", aggiunta in Fase 2, non scartava nessun chunk irrilevante in
+  più e in italiano faceva danni: rimossa (rilevanti tenuti 18/22 invece di 16/22).
+- **Il modello copia gli esempi dei prompt** (terza volta): la riscrittura inseriva
+  "excessive vibration" in query che non c'entravano. Senza esempio: chunk giusto
+  trovato 21/21 invece di 20/21, zero contaminazioni.
+- **Traduzione dei termini tecnici: il glossario va dato dal codice, non dal prompt.**
+  Il 3B traduceva "cuscinetti" con *bushings*. Con il glossario intero nel prompt lo
+  copiava ovunque ("mechanical seal" in query che non c'entravano); passando solo i
+  termini presenti nella domanda (`term_hints()`), italiano 10/10 e inglese invariato.
+- **Una regola ibrida per il giudice, provata e scartata.** Accettare senza giudice le
+  risposte "ancorate" a numeri verificati sembrava ottimo (19/20 corrette accettate), ma
+  accettava fino a 5 invenzioni su 9 del tipo "numero giusto + azione inventata".
+- **I miglioramenti dei componenti non si sono tradotti in accuratezza end-to-end**, e
+  la valutazione ha scoperto una **regressione di sicurezza**: alla domanda sulla marca
+  del motore (che il manuale non indica) l'agente rispondeva "an ABB AC induction
+  motor". Il guardrail deterministico ora controlla anche le **sigle**: su 109 risposte
+  corrette non ne boccia nessuna, e quell'invenzione viene fermata.
+
+### Eseguirla
+
+```bash
+python scripts/evaluate.py                         # entrambi i sistemi, tutte le domande (~25 min)
+python scripts/evaluate.py --system agent --split test --gate   # come la CI
+python scripts/evaluate.py --ids test-18 dev-02    # domande specifiche
+python scripts/evaluate.py --rescore eval/results/report.json   # metriche nuove, senza LLM
+```
+
+### Test e CI
+
+```bash
+pytest tests/unit            # 107 test senza LLM, ~4 s, anche con Ollama spento
+pytest tests/integration     # con Ollama: saltati in automatico se non risponde
+```
+
+- **`ci.yml`**, a ogni push e pull request: ruff (lint e formato), mypy, unit test.
+- **`eval.yml`**, quando cambia qualcosa che tocca l'agente (codice, prompt, dataset,
+  soglie), a mano e ogni lunedì: installa Ollama sul runner, scarica i modelli, costruisce
+  l'indice, esegue gli integration test e la valutazione sullo split test. **Se l'agente
+  scende sotto le soglie di `eval/thresholds.json`, la CI fallisce.** Le soglie hanno un
+  margine (il runner usa la CPU, il Mac la GPU), tranne la sicurezza: al massimo una
+  domanda con risposta sbagliata o invenzioni.
+
 ### Limiti noti
 
-L'agente è tarato per la **precisione**: preferisce dire "non lo so" piuttosto che
-rispondere senza supporto. Il prezzo sono alcuni **falsi negativi** e alcuni percorsi
-inutilmente lunghi. Esempio dalle 10 domande di taratura: per *"How often should the
-mechanical seal be replaced?"* la risposta finale è giusta (8000 ore), ma ci arriva in
-~30 s invece di ~10: il grader scarta il chunk giusto (§4) e la riscrittura aggiunge
-"excessive vibration and leakage", parole prese dall'esempio nel prompt di riscrittura.
-È lo stesso difetto della citazione `manual.md`: il modello da 3B copia gli esempi dei
-prompt. Anche le domande che richiedono di collegare punti diversi del manuale (es.
-*"How often should I check the coupling alignment?"*) restano difficili. Inoltre la
-comprensione dell'italiano dipende dal modello locale da 3B. Misurare questi compromessi
-in modo sistematico è il compito della Fase 4 (eval), che verificherà anche se gli altri
-giudici traggono lo stesso vantaggio dal testo libero.
+- **Rifiuti di troppo.** I 9 errori dell'agente su 72 domande sono tutti "non lo so" su
+  domande con risposta. Due cause, misurate: il **grader** scarta il chunk giusto (es.
+  "Can different types of grease be mixed?") e il **giudice di fondatezza** da 3B boccia
+  risposte corrette quasi alla lettera (~15–20% sui banchi). Nessuna variante di prompt
+  provata le elimina senza far passare invenzioni: servirebbe un giudice più grande,
+  escluso dai vincoli (tutto locale, M1 da 8 GB).
+- **Conoscenza di dominio implicita**: "cuscinetto lato accoppiamento" = *drive end*
+  il manuale non lo dice. Ora lo risolve il glossario (`term_hints()`), ma solo per i
+  termini che vi sono elencati: il glossario va mantenuto insieme al corpus.
+- **Domande su più sezioni** (es. "ogni quanto controllare l'allineamento?") restano le
+  più difficili per entrambi i sistemi.
+- **Un solo manuale** nel corpus: il retrieval è facile (chunk giusto nei top-4 nel 93%
+  dei casi). Con più documenti il vantaggio del grading dovrebbe crescere: è la prossima
+  cosa da misurare.
+- **Costo**: l'agente fa ~10 chiamate LLM per domanda contro 1, e impiega circa 3 volte
+  il tempo del RAG lineare.
 
 ## Stack tecnologico
 
@@ -228,8 +329,8 @@ giudici traggono lo stesso vantaggio dal testo libero.
 | Backend API | FastAPI |
 | Configurazione | pydantic-settings |
 | Observability | Arize Phoenix (OpenTelemetry + OpenInference), logging con request ID |
-| Eval | ragas + trajectory eval *(previsti)* |
-| CI | GitHub Actions *(prevista)* |
+| Eval | dataset etichettato (72 domande, split dev/test/holdout), metriche deterministiche di retrieval, risposta e traiettoria |
+| Test / CI | pytest (unit senza LLM + integration con Ollama), ruff, mypy, GitHub Actions con quality gate |
 
 ## Struttura del progetto
 
@@ -237,6 +338,11 @@ giudici traggono lo stesso vantaggio dal testo libero.
 src/copilot/
 ├── config.py          # configurazione centralizzata (pydantic-settings, prefisso COPILOT_)
 ├── errors.py          # errori di dominio (503/504/400) e traduzione delle eccezioni di Ollama
+├── evaluation/
+│   ├── dataset.py     # EvalItem + load_dataset() (eval/dataset.jsonl)
+│   ├── metrics.py     # metriche deterministiche: fatti, rifiuti, invenzioni, traiettoria, retrieval
+│   ├── runner.py      # esegue lineare/agente sul dataset, aggrega, scrive il report
+│   └── gate.py        # quality gate: soglie in eval/thresholds.json
 ├── agent/
 │   ├── state.py       # AgentState — la memoria di lavoro che scorre tra i nodi
 │   ├── nodes.py       # i nodi: route, retrieve, grade, rewrite, generate, check, fallback
@@ -261,11 +367,18 @@ src/copilot/
     ├── retriever.py   # get_retriever()   — il vector store come Runnable
     └── chain.py       # get_rag_chain(), answer() — la baseline lineare (LCEL)
 
+eval/dataset.jsonl     # il dataset di valutazione (72 domande etichettate)
+eval/thresholds.json   # le soglie del quality gate in CI
+eval/results/          # l'ultimo report di valutazione (report.md + report.json)
+tests/unit/            # pytest senza LLM (gira ovunque in pochi secondi)
+tests/integration/     # pytest con Ollama vero (saltati in automatico se non c'è)
+.github/workflows/     # ci.yml: lint, tipi, unit test · eval.yml: Ollama + integration + eval gate
 data/manuals/          # corpus sorgente (versionato)
 data/chroma/           # vector DB generato (non versionato: si rigenera con scripts/ingest.py)
 scripts/ingest.py      # comando per (ri)popolare il vector store
 scripts/compare.py     # prima/dopo: RAG lineare vs agente, fianco a fianco
-Test_Funzioni/         # uno script di test per funzione, in ordine bottom-up (01–20)
+scripts/evaluate.py    # valutazione sul dataset (+ --gate per la CI)
+Test_Funzioni/         # script didattici, uno per funzione, in ordine bottom-up (01–20)
 info/                  # documenti di design e note di studio
 img/                   # immagini del progetto
 ```
@@ -378,7 +491,7 @@ copia `.env.example` in `.env`.
 | 1 | Baseline RAG lineare (ingestion, retrieval, chain LCEL, citazioni, API FastAPI) | ✅ completata |
 | 2 | Agente self-corrective con LangGraph (route / grade / rewrite / generate / check) | ✅ completata |
 | 3 | Guardrail di input/output, gestione errori (retry, 503/504), readiness, tracing con Phoenix | ✅ completata |
-| 4 | Dataset di valutazione (ragas + trajectory eval) e CI/CD | 🔜 prossima |
+| 4 | Dataset di valutazione, metriche di retrieval/risposta/traiettoria, taratura misurata, pytest + GitHub Actions con quality gate | ✅ completata |
 | 5 | Opzionali: tool verso sistemi esterni (CMMS), Docker/K8s, framework alternativi | futura |
 
 ## Documentazione

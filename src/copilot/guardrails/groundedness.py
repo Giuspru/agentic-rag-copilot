@@ -7,6 +7,10 @@ is most dangerous in a maintenance context, and where a string comparison is rel
 
   - **numbers** (intervals, temperatures, torques, quantities...);
   - **part codes** (e.g. ``SP-CP2000-SEAL``);
+  - **acronyms and brand-like names** in capitals (e.g. ``ABB``, ``SKF``, ``AC``): added
+    in phase 4, after the evaluation caught the agent answering "Which motor brand is
+    used?" (the manual does not say) with "an ABB AC induction motor". Replayed on the
+    109 correct answers of the evaluation, the rule flagged none of them;
   - **cited file names**: each must be exactly one of the ``[Source: ...]`` documents of
     the excerpts (``manual.md`` is not ``centrifugal-pump-maintenance-manual.md``).
 
@@ -25,6 +29,7 @@ import re
 _SOURCE_RE = re.compile(r"\[Source: ([^\]]+)\]")  # the headers written by format_docs()
 _FILE_RE = re.compile(r"\b[\w-]+(?:\.[\w-]+)*\.(?:md|pdf|txt)\b", re.IGNORECASE)
 _CODE_RE = re.compile(r"\b[A-Z]{2,}[A-Z0-9]*(?:-[A-Z0-9]+)+\b")
+_ACRONYM_RE = re.compile(r"\b[A-Z][A-Z0-9]+\b")  # ABB, NLGI, DN100 (not pure digits)
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
 # Numbered-list markers ("1. ", "2) ") are formatting, not claims.
 _LIST_MARKER_RE = re.compile(r"^\s*\d+[.)]\s+", re.MULTILINE)
@@ -35,7 +40,7 @@ def _numbers(text: str) -> set[str]:
 
 
 def unsupported_claims(answer: str, context: str) -> list[str]:
-    """Return the numbers, part codes and file names in ``answer`` absent from ``context``.
+    """Return the numbers, codes, acronyms and file names in ``answer`` absent from ``context``.
 
     An empty list means the check passed.
     """
@@ -49,7 +54,14 @@ def unsupported_claims(answer: str, context: str) -> list[str]:
     claims = _FILE_RE.sub(" ", answer)
     unsupported += [c for c in dict.fromkeys(_CODE_RE.findall(claims)) if c not in context]
 
-    claims = _LIST_MARKER_RE.sub(" ", _CODE_RE.sub(" ", claims))
+    claims = _CODE_RE.sub(" ", claims)
+    unsupported += [
+        a
+        for a in dict.fromkeys(_ACRONYM_RE.findall(claims))
+        if not a.isdigit() and a not in context
+    ]
+
+    claims = _LIST_MARKER_RE.sub(" ", claims)
     known = _numbers(context)
     for raw in dict.fromkeys(_NUMBER_RE.findall(claims)):
         if re.sub(r"[.,]", "", raw) not in known:

@@ -20,14 +20,14 @@ class AgentState(TypedDict, total=False):
     ``question`` exists, the other keys are written by the nodes.
     """
 
-    question: str                 # the user's original question (never modified)
-    query: str                    # the search query: starts as the question, may be rewritten
+    question: str  # the user's original question (never modified)
+    query: str  # the search query: starts as the question, may be rewritten
     route: Literal["retrieve", "direct"]
-    documents: list[Document]     # chunks that survived grading (only relevant ones)
-    generation: str               # the current answer
+    documents: list[Document]  # chunks that survived grading (only relevant ones)
+    generation: str  # the current answer
     verdict: Literal["useful", "not_grounded", "not_useful"]
-    rewrites: int                 # query rewrites done so far
-    generations: int              # answer attempts done so far
+    rewrites: int  # query rewrites done so far
+    generations: int  # answer attempts done so far
 
     # Trace of what the agent did, one line per node. ``Annotated[..., operator.add]``
     # is a *reducer*: instead of replacing the list, each node's update is appended.

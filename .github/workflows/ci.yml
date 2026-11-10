@@ -1,0 +1,38 @@
+# Continuous integration — fast checks, on every push and pull request.
+#
+# No LLM involved: lint, formatting, type check and the unit tests (the agent's graph is
+# exercised with fake nodes, the API with a mocked agent). About a minute.
+# The slow evaluation with the real models lives in eval.yml.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, types, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev,tracing]"
+      - name: Lint (ruff)
+        run: ruff check src scripts tests
+      - name: Format (ruff)
+        run: ruff format --check src scripts tests
+      - name: Type check (mypy)
+        run: mypy src
+      - name: Unit tests (no LLM)
+        run: pytest tests/unit -q

@@ -95,6 +95,13 @@ DIRECT_PROMPT = ChatPromptTemplate.from_messages(
     ]
 )
 
+# Phase 4, measured on 83 auto-labeled (question, chunk) pairs of the dev split: the
+# former last line "Be strict: sharing a few generic words is NOT enough" rejected no
+# extra irrelevant chunk in English, and in Italian it dropped 2 of 3 relevant chunks
+# while keeping 2 irrelevant ones. Without it: relevant kept 18/22 (was 16/22),
+# irrelevant dropped 54/61 (was 52/61). Two more findings from the same bench: a
+# plain-text yes/no reply (better for the groundedness judge) collapses this judge to
+# 2/19, and so does moving the question *before* the excerpt. The question stays last.
 GRADE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
@@ -102,13 +109,50 @@ GRADE_PROMPT = ChatPromptTemplate.from_messages(
             "You are a grader assessing whether a retrieved document excerpt is relevant "
             "to a user question.\n"
             "If the excerpt contains information that helps answer the question, grade "
-            "it 'yes'. Otherwise grade it 'no'.\n"
-            "Be strict: sharing a few generic words (e.g. 'pump') is NOT enough.",
+            "it 'yes'. Otherwise grade it 'no'.",
         ),
         ("human", "Excerpt:\n{document}\n\nQuestion: {question}"),
     ]
 )
 
+# Italian -> English equivalents of the manual's terms. The 3B model mistranslates some
+# of them ("cuscinetti" -> "bushings" instead of "bearings", "giunto" -> "bearing"), and
+# then retrieval, grading and checks all work on the wrong subject. Putting the whole
+# glossary in the prompt made it worse: the model copied it into unrelated queries
+# ("mechanical seal" everywhere, English 15/16). So the code looks the terms up in the
+# question and passes only the ones present: English questions get no hint at all.
+# Phase 4, dev + didactic questions: Italian 9/10 -> 10/10, English unchanged (16/16).
+TERM_HINTS = {
+    r"\bcuscinett[oi]\b": "bearing",
+    r"\btenut[ae]\b": "seal",
+    r"\bgiunt[oi]\b": "coupling",
+    r"\bgirant[ei]\b": "impeller",
+    r"\banell[oi] di usura\b": "wear ring",
+    r"\bguarnizion[ei]\b": "gasket",
+    r"\bprevalenza\b": "head",
+    r"\bportata\b": "flow",
+    r"\badescar\w*": "prime",
+    r"\blato (?:accoppiamento|comando)\b": "drive end",
+    r"\blato opposto\b": "non-drive end",
+}
+
+
+def term_hints(question: str) -> str:
+    """The glossary entries that appear in the question, as a line for the prompt."""
+    low = question.lower()
+    found = [
+        f"{match.group(0)} = {english}"
+        for pattern, english in TERM_HINTS.items()
+        if (match := re.search(pattern, low))
+    ]
+    return "\nTerms: " + "; ".join(found) if found else ""
+
+
+# The former version had an example, "e.g. 'excessive vibration causes' instead of 'it
+# shakes'": the 3B model copied it into unrelated queries ("part number for excessive
+# vibration causes in a mechanical seal"), 4 times on 21 dev questions. Without the
+# example, and with "keep the subject / invent nothing", the rewritten query retrieves
+# the answer chunk for 21/21 dev questions (was 20/21), with no copied example.
 REWRITE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
@@ -117,11 +161,12 @@ REWRITE_PROMPT = ChatPromptTemplate.from_messages(
             "manuals (written in English). The previous query did not retrieve relevant "
             "excerpts.\n"
             "Rewrite it as a short, specific English search query (translate it if the "
-            "question is in another language) using the technical "
-            "terms a maintenance manual would use (e.g. 'excessive vibration causes' "
-            "instead of 'it shakes'). Reply with the query only, no explanations.",
+            "question is in another language). Keep the subject of the question; use the "
+            "technical terms a maintenance manual would use for that same subject. "
+            "Do not add topics the question does not mention, and never invent numbers, "
+            "models or part codes. Reply with the query only, no explanations.",
         ),
-        ("human", "Original question: {question}\nPrevious query: {query}"),
+        ("human", "Original question: {question}\nPrevious query: {query}{term_hints}"),
     ]
 )
 
@@ -129,9 +174,16 @@ REWRITE_PROMPT = ChatPromptTemplate.from_messages(
 # hint: it helps the 3B model understand questions asked in another language.
 GENERATE_HUMAN = "Context:\n{context}\n\nQuestion: {question}\n(The question in English: {query})"
 
+# The deterministic guardrail rejects any number that is not in the excerpts, so a unit
+# conversion (40 °C -> "104 °F") is a guaranteed failure: the writer is told the rule.
+ANSWER_RULES = (
+    "\n- Answer in the same language as the question."
+    "\n- Copy numbers and units exactly as written in the context; never convert units."
+)
+
 GENERATE_PROMPT = ChatPromptTemplate.from_messages(
     [
-        ("system", SYSTEM_PROMPT + "\n- Answer in the same language as the question."),
+        ("system", SYSTEM_PROMPT + ANSWER_RULES),
         ("human", GENERATE_HUMAN),
     ]
 )
@@ -143,8 +195,9 @@ STRICT_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            SYSTEM_PROMPT + "\n- Answer in the same language as the question."
-            "\n- WARNING: a previous draft contained claims not supported by the "
+            SYSTEM_PROMPT
+            + ANSWER_RULES
+            + "\n- WARNING: a previous draft contained claims not supported by the "
             "context. Use only statements you can point to in the context and copy "
             "numbers and part codes exactly as written.",
         ),
@@ -273,7 +326,13 @@ def rewrite_query(state: AgentState) -> AgentState:
 
     New chunks deserve a fresh answer budget, so the generation counter is reset.
     """
-    query = _writer(REWRITE_PROMPT).invoke({"question": state["question"], "query": state["query"]})
+    query = _writer(REWRITE_PROMPT).invoke(
+        {
+            "question": state["question"],
+            "query": state["query"],
+            "term_hints": term_hints(state["question"]),
+        }
+    )
     query = query.strip().strip('"')
     return {
         "query": query,
@@ -325,6 +384,7 @@ def check_answer(state: AgentState) -> AgentState:
     grounded = _yes_no_judge(GROUNDED_PROMPT).invoke(
         {"context": context, "generation": state["generation"]}
     )
+    verdict: Literal["useful", "not_grounded", "not_useful"]
     if grounded == "no":
         verdict = "not_grounded"
     else:

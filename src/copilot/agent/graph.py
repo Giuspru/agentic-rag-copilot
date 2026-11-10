@@ -149,11 +149,13 @@ def get_agent() -> CompiledStateGraph:
     return graph.compile()
 
 
-def run_agent(question: str) -> dict:
+def run_agent(question: str, include_contexts: bool = False) -> dict:
     """Run the agent on a question.
 
     Returns the answer, the source documents it is grounded in (empty when the agent
-    didn't answer from the manuals), and the trace of steps taken.
+    didn't answer from the manuals), and the trace of steps taken. With
+    ``include_contexts`` it also returns ``contexts``: the text of the chunks the answer
+    was generated from — the evaluation needs them, the API does not.
 
     Raises ``InputRejectedError`` (before any LLM call) if the input guardrail refuses
     the question, and ``LLMUnavailableError`` / ``LLMTimeoutError`` if Ollama fails
@@ -172,4 +174,7 @@ def run_agent(question: str) -> dict:
         len(final["steps"]),
         " | ".join(final["steps"]),
     )
-    return {"answer": final["generation"], "sources": sources, "steps": final["steps"]}
+    result = {"answer": final["generation"], "sources": sources, "steps": final["steps"]}
+    if include_contexts:
+        result["contexts"] = [doc.page_content for doc in final.get("documents", [])]
+    return result

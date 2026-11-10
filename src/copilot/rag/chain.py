@@ -50,9 +50,7 @@ def format_docs(docs) -> str:
     Each chunk is prefixed with its source file so the model can cite it, and chunks are
     separated by blank lines so they read as distinct passages.
     """
-    return "\n\n".join(
-        f"[Source: {doc.metadata['source']}]\n{doc.page_content}" for doc in docs
-    )
+    return "\n\n".join(f"[Source: {doc.metadata['source']}]\n{doc.page_content}" for doc in docs)
 
 
 @lru_cache

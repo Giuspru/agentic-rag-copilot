@@ -1,6 +1,6 @@
 [project]
 name = "copilot"
-version = "0.3.0"
+version = "0.4.0"
 description = "Agentic RAG Copilot — self-corrective retrieval-augmented generation over technical/maintenance documents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,7 @@ tracing = [
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "mypy>=1.10",
 ]
 
 [build-system]
@@ -46,3 +47,14 @@ packages = ["src/copilot"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "ollama: needs a running Ollama with the models pulled (skipped automatically otherwise)",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
