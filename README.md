@@ -292,8 +292,8 @@ pytest tests/integration     # con Ollama: saltati in automatico se non risponde
 ```
 
 - **`ci.yml`**, a ogni push e pull request: ruff (lint e formato), mypy, unit test.
-- **`eval.yml`**, quando cambia qualcosa che tocca l'agente (codice, prompt, dataset,
-  soglie), a mano e ogni lunedì: installa Ollama sul runner, scarica i modelli, costruisce
+- **`eval.yml`**, solo **a mano** (GitHub → Actions → Evaluation → *Run workflow*: dura
+  circa un'ora, perché il runner non ha GPU): installa Ollama sul runner, scarica i modelli, costruisce
   l'indice, esegue gli integration test e la valutazione sullo split test. **Se l'agente
   scende sotto le soglie di `eval/thresholds.json`, la CI fallisce.** Le soglie hanno un
   margine (il runner usa la CPU, il Mac la GPU), tranne la sicurezza: al massimo una

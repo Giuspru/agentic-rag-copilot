@@ -5,25 +5,14 @@
 # below eval/thresholds.json. The full report is uploaded as an artifact.
 #
 # GitHub runners have no GPU: on CPU each LLM call takes seconds instead of a fraction,
-# so the job takes about an hour and runs only when something that can change the
-# agent's behavior changes (code, prompts, dataset, thresholds), on demand, and weekly
-# (to catch drift in dependencies or in the models). Results on CPU can differ slightly
-# from an Apple-silicon laptop: the thresholds keep a margin.
+# so the job takes about an hour. It runs ONLY ON DEMAND: GitHub -> Actions ->
+# Evaluation -> "Run workflow". Results on CPU can differ slightly from an Apple-silicon
+# laptop: the thresholds keep a margin.
 
 name: Evaluation
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "eval/**"
-      - "data/manuals/**"
-      - "pyproject.toml"
-      - ".github/workflows/eval.yml"
-  workflow_dispatch:
-  schedule:
-    - cron: "0 4 * * 1" # every Monday
+  workflow_dispatch: # manual start only
 
 concurrency:
   group: eval-${{ github.ref }}
