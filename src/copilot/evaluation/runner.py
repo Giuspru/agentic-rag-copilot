@@ -205,8 +205,10 @@ def to_markdown(report: dict) -> str:
     lines = [
         f"# Evaluation report — {meta['date']}",
         "",
-        f"Version {meta['version']} · LLM `{meta['llm_model']}` · embeddings "
-        f"`{meta['embedding_model']}` · k={meta['retrieval_k']} · {meta['n_items']} questions",
+        (
+            f"Version {meta['version']} · LLM `{meta['llm_model']}` · embeddings "
+            f"`{meta['embedding_model']}` · k={meta['retrieval_k']} · {meta['n_items']} questions"
+        ),
         "",
     ]
     for name in ("holdout", "test", "dev", "all"):

@@ -28,20 +28,28 @@ _INJECTION_PATTERNS = [
     # "instructions" alone is a normal word in a maintenance manual ("show me the
     # instructions for seal replacement"): the patterns require the assistant's own
     # instructions (your / previous / all...) to avoid blocking legitimate questions.
-    r"\b(ignore|disregard|forget|override)\b.{0,20}\b(previous|prior|above|earlier|all|"
-    r"your)\b.{0,20}\b(instructions?|rules|prompts?|guidelines)\b",
-    r"\b(reveal|show|print|repeat|leak)\b.{0,30}\b(your|initial|hidden)\s+"
-    r"(prompt|instructions|rules)\b",
+    (
+        r"\b(ignore|disregard|forget|override)\b.{0,20}\b(previous|prior|above|earlier|all|"
+        r"your)\b.{0,20}\b(instructions?|rules|prompts?|guidelines)\b"
+    ),
+    (
+        r"\b(reveal|show|print|repeat|leak)\b.{0,30}\b(your|initial|hidden)\s+"
+        r"(prompt|instructions|rules)\b"
+    ),
     r"\bsystem prompt\b",
     r"\byou are now\b",
     r"\bpretend (to be|you are)\b",
     r"\bjailbreak\b",
     # Italian (\w* accepts attached pronouns: "mostrami", "ignorale")
     r"\b(ignora|dimentica|trascura)\w*\b.{0,20}\b(tutte|tue)\b.{0,20}\b(istruzioni|regole)\b",
-    r"\b(ignora|dimentica|trascura)\w*\b.{0,20}\b(istruzioni|regole|prompt)\s+"
-    r"(precedenti|iniziali|di sistema)\b",
-    r"\b(mostra|rivela|stampa|ripeti)\w*\b.{0,30}\b(tue|tuo|iniziali|nascost[ei])\s+"
-    r"(prompt|istruzioni|regole)\b",
+    (
+        r"\b(ignora|dimentica|trascura)\w*\b.{0,20}\b(istruzioni|regole|prompt)\s+"
+        r"(precedenti|iniziali|di sistema)\b"
+    ),
+    (
+        r"\b(mostra|rivela|stampa|ripeti)\w*\b.{0,30}\b(tue|tuo|iniziali|nascost[ei])\s+"
+        r"(prompt|istruzioni|regole)\b"
+    ),
     r"\bprompt di sistema\b",
     r"\b(da ora|adesso) sei\b",
     r"\bfai finta di essere\b",

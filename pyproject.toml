@@ -33,8 +33,8 @@ tracing = [
 ]
 dev = [
     "pytest>=8.0",
-    "ruff>=0.6",
-    "mypy>=1.10",
+    "ruff==0.17.4",               # pinned: new releases add rules and break CI
+    "mypy==2.4.1",                # pinned for the same reason
 ]
 
 [build-system]

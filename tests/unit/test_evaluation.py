@@ -5,8 +5,8 @@ import pytest
 from copilot.agent.nodes import FALLBACK_ANSWER
 from copilot.evaluation import metrics
 from copilot.evaluation.dataset import load_dataset
-from copilot.evaluation.runner import corpus_text
 from copilot.evaluation.gate import check_gate, load_thresholds
+from copilot.evaluation.runner import corpus_text
 
 
 @pytest.mark.parametrize(

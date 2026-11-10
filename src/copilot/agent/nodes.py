@@ -64,19 +64,21 @@ ROUTE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You route messages for a maintenance assistant that answers from equipment "
-            "maintenance manuals.\n"
-            "- 'direct': the message is ONLY a greeting, a thank-you, small talk, or asks "
-            "what the assistant can do. No information is requested.\n"
-            "- 'retrieve': the message asks for any information (facts, procedures, "
-            "values, parts, troubleshooting), in any language and on any topic.\n\n"
-            "Examples:\n"
-            "'Hello!' -> direct\n"
-            "'Ciao, cosa sai fare?' -> direct\n"
-            "'Thanks, that helped' -> direct\n"
-            "'How do I replace the seal?' -> retrieve\n"
-            "'la pompa vibra' -> retrieve\n"
-            "'What is the capital of France?' -> retrieve",
+            (
+                "You route messages for a maintenance assistant that answers from equipment "
+                "maintenance manuals.\n"
+                "- 'direct': the message is ONLY a greeting, a thank-you, small talk, or asks "
+                "what the assistant can do. No information is requested.\n"
+                "- 'retrieve': the message asks for any information (facts, procedures, "
+                "values, parts, troubleshooting), in any language and on any topic.\n\n"
+                "Examples:\n"
+                "'Hello!' -> direct\n"
+                "'Ciao, cosa sai fare?' -> direct\n"
+                "'Thanks, that helped' -> direct\n"
+                "'How do I replace the seal?' -> retrieve\n"
+                "'la pompa vibra' -> retrieve\n"
+                "'What is the capital of France?' -> retrieve"
+            ),
         ),
         ("human", "{question}"),
     ]
@@ -86,10 +88,12 @@ DIRECT_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a maintenance assistant that answers questions using equipment "
-            "maintenance manuals. Reply briefly and politely to the user's message. "
-            "Never state technical facts, numbers or procedures here: if the user asks "
-            "for information, invite them to ask a question about the manuals.",
+            (
+                "You are a maintenance assistant that answers questions using equipment "
+                "maintenance manuals. Reply briefly and politely to the user's message. "
+                "Never state technical facts, numbers or procedures here: if the user asks "
+                "for information, invite them to ask a question about the manuals."
+            ),
         ),
         ("human", "{question}"),
     ]
@@ -106,10 +110,12 @@ GRADE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a grader assessing whether a retrieved document excerpt is relevant "
-            "to a user question.\n"
-            "If the excerpt contains information that helps answer the question, grade "
-            "it 'yes'. Otherwise grade it 'no'.",
+            (
+                "You are a grader assessing whether a retrieved document excerpt is relevant "
+                "to a user question.\n"
+                "If the excerpt contains information that helps answer the question, grade "
+                "it 'yes'. Otherwise grade it 'no'."
+            ),
         ),
         ("human", "Excerpt:\n{document}\n\nQuestion: {question}"),
     ]
@@ -157,14 +163,16 @@ REWRITE_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You rewrite search queries for a vector database of equipment maintenance "
-            "manuals (written in English). The previous query did not retrieve relevant "
-            "excerpts.\n"
-            "Rewrite it as a short, specific English search query (translate it if the "
-            "question is in another language). Keep the subject of the question; use the "
-            "technical terms a maintenance manual would use for that same subject. "
-            "Do not add topics the question does not mention, and never invent numbers, "
-            "models or part codes. Reply with the query only, no explanations.",
+            (
+                "You rewrite search queries for a vector database of equipment maintenance "
+                "manuals (written in English). The previous query did not retrieve relevant "
+                "excerpts.\n"
+                "Rewrite it as a short, specific English search query (translate it if the "
+                "question is in another language). Keep the subject of the question; use the "
+                "technical terms a maintenance manual would use for that same subject. "
+                "Do not add topics the question does not mention, and never invent numbers, "
+                "models or part codes. Reply with the query only, no explanations."
+            ),
         ),
         ("human", "Original question: {question}\nPrevious query: {query}{term_hints}"),
     ]
@@ -209,14 +217,16 @@ GROUNDED_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a grader checking whether an answer is supported by a set of facts "
-            "from a maintenance manual.\n"
-            "Grade 'yes' if the answer's technical content (causes, actions, numbers, "
-            "part codes) can be found in the facts, even if it is paraphrased, "
-            "summarized, or written in another language.\n"
-            "Grade 'no' only if the answer states a number, part code, cause or action "
-            "that does NOT appear in the facts.\n"
-            "Ignore citations, section numbers and file names: they are not claims.",
+            (
+                "You are a grader checking whether an answer is supported by a set of facts "
+                "from a maintenance manual.\n"
+                "Grade 'yes' if the answer's technical content (causes, actions, numbers, "
+                "part codes) can be found in the facts, even if it is paraphrased, "
+                "summarized, or written in another language.\n"
+                "Grade 'no' only if the answer states a number, part code, cause or action "
+                "that does NOT appear in the facts.\n"
+                "Ignore citations, section numbers and file names: they are not claims."
+            ),
         ),
         ("human", "Facts:\n{context}\n\nAnswer: {generation}\n\nReply with one word: yes or no."),
     ]
@@ -226,12 +236,14 @@ ANSWERS_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a grader checking whether an answer addresses a question. The "
-            "question and the answer may be in different languages.\n"
-            "Grade 'yes' if the answer gives information about the same problem or "
-            "component the question asks about.\n"
-            "Grade 'no' if the answer is about a different problem or component, or if "
-            "it only says it does not know.",
+            (
+                "You are a grader checking whether an answer addresses a question. The "
+                "question and the answer may be in different languages.\n"
+                "Grade 'yes' if the answer gives information about the same problem or "
+                "component the question asks about.\n"
+                "Grade 'no' if the answer is about a different problem or component, or if "
+                "it only says it does not know."
+            ),
         ),
         ("human", "Question: {question}\n\nAnswer: {generation}"),
     ]

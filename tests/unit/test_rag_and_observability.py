@@ -74,7 +74,7 @@ def test_check_ollama_unreachable(monkeypatch):
 @pytest.mark.parametrize(("count", "ok"), [(11, True), (0, False)])
 def test_check_vectorstore(monkeypatch, count, ok):
     class FakeStore:
-        class _collection:  # noqa: N801 — mimics Chroma's attribute name
+        class _collection:
             @staticmethod
             def count():
                 return count

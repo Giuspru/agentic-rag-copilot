@@ -41,17 +41,15 @@ def test_is_transient(exc, transient):
     ],
 )
 def test_llm_errors_translates(exc, domain_error, status):
-    with pytest.raises(domain_error) as caught:
-        with llm_errors():
-            raise exc
+    with pytest.raises(domain_error) as caught, llm_errors():
+        raise exc
     assert caught.value.status_code == status
     assert caught.value.__cause__ is exc
 
 
 def test_llm_errors_lets_bugs_through():
-    with pytest.raises(ValueError):
-        with llm_errors():
-            raise ValueError("a bug is not an Ollama error")
+    with pytest.raises(ValueError), llm_errors():
+        raise ValueError("a bug is not an Ollama error")
 
 
 @pytest.mark.parametrize(
